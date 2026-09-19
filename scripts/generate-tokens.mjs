@@ -30,7 +30,11 @@ export function oklchToHex(L, C, H) {
 // step -> lightness, chosen so brand anchors land on their named steps.
 const L_BY_STEP = {
   50: 0.975, 100: 0.945, 200: 0.885, 300: 0.805, 400: 0.715,
-  500: 0.634, 600: 0.545, 700: 0.430, 800: 0.324, 900: 0.245, 950: 0.183,
+  500: 0.634,
+  // 550 exists for one reason: it is the lightest ink that clears WCAG AA
+  // (4.5:1) for body text on every light surface, including the sunken one.
+  550: 0.520,
+  600: 0.545, 700: 0.430, 800: 0.324, 900: 0.245, 950: 0.183,
 };
 
 /** Chroma profile per ramp: [chromaAtPeak, peakLightness, minFactorAtEnds] */

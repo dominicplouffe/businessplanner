@@ -1,0 +1,51 @@
+# Venturally
+
+> Investor- and lender-grade business plans built on a deterministic financial
+> model. Every figure in every statement is computed by an engine, not written
+> by a language model; every market claim carries a dated source; and the
+> narrative is reconciled against the model before a plan can be exported.
+
+## What it does
+
+- Generates a complete business plan from a structured, business-model-aware intake.
+- Builds three linked financial statements (P&L, cash flow, balance sheet) monthly
+  across 60 periods, with the balance sheet asserted to balance in every period.
+- Computes underwriter ratios: debt service coverage, current ratio, debt to
+  equity, owner compensation, amortisation schedules, sources and uses.
+- Sizes markets bottom-up with the arithmetic shown, cross-checked top-down, and
+  cites every statistic with a retrievable, dated source.
+- Reviews the plan against the rubric of its intended reader and blocks export on
+  twelve failure conditions, including any figure in the prose that does not
+  reconcile to the model.
+
+## How it differs
+
+- The AI proposes assumptions; a deterministic TypeScript engine computes every
+  number that appears in a statement.
+- Regulatory values (SBA DSCR thresholds, EB-5 investment minimums) are dated
+  configuration with an effective-date range and a source, never constants.
+- Industry benchmarks warn on out-of-band assumptions but never overwrite them.
+- Every input driver is tagged known, estimated or benchmark-default, and that
+  provenance is printed in the finished document.
+
+## Pricing
+
+- Draft: $0. Generate a complete plan and read every page. No card required.
+- Plan: $199 one-time per finished plan. Unlocks PDF, Word, Excel and PowerPoint
+  export, shareable links with read analytics, and the pitch deck. Permanent.
+- Live: $39/month, optional. Actuals tracking, re-forecasting, monthly lender
+  variance summaries. One-click cancellation.
+- 30-day money-back guarantee on any payment.
+
+## Segments
+
+- Investor raise (pre-seed and seed)
+- Immigration business plans (E-2, L-1A, EB-5) — document preparation only, not
+  legal advice; review by licensed counsel is recommended before filing.
+
+## Links
+
+- Pricing: https://getventurely.com/pricing
+- Financial model: https://getventurely.com/product/financials
+- Market research: https://getventurely.com/product/market
+- Plan review: https://getventurely.com/product/review

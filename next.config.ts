@@ -8,7 +8,11 @@ const config: NextConfig = {
   // earlier means casting every href, which defeats the point. Re-enable in the
   // polish phase, when every link resolves.
   typedRoutes: false,
-  experimental: { optimizePackageImports: ["lucide-react", "recharts"] },
+  // The dev server treats a different host as cross-origin and blocks its dev
+  // resources, which silently prevents hydration. Headless-browser checks hit
+  // 127.0.0.1, so allow it explicitly. Dev-only; no effect on production.
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
+  experimental: { optimizePackageImports: ["lucide-react"] },
 };
 
 export default config;

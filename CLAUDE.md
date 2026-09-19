@@ -74,6 +74,13 @@ Hairlines rather than shadows; motion under 200ms and reduced-motion aware.
 
 Regenerate colour ramps with `node scripts/generate-tokens.mjs`.
 
+**Charts are hand-built SVG** (`src/components/charts/`), not a library. If a
+chart renders blank in the browser, check hydration first: Next's dev server
+blocks its dev resources when the host looks cross-origin, which silently stops
+every client component from hydrating and makes any measurement-based component
+look broken. `allowedDevOrigins` in `next.config.ts` covers 127.0.0.1 and
+localhost.
+
 ## Known gaps
 
 `typedRoutes` is off until the route surface is complete — nav data points at
@@ -81,3 +88,13 @@ pages that arrive in the content phase. Re-enable in the polish phase.
 
 Regulatory values marked `confidence: "unverified"` must not be presented to a
 user as authoritative. See `CONFIG_VINTAGE.verificationQueue`.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

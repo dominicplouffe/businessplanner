@@ -53,9 +53,17 @@ export function formatDelta(value: number, format: (n: number) => string): {
   return { text: `${arrow} ${format(Math.abs(value))}`, direction };
 }
 
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+/** "2026-04" -> "Apr 2026". Used in tooltips, where the month matters. */
 export function formatMonthLabel(iso: string): string {
   const [year, month] = iso.split("-");
-  const names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const idx = Number(month) - 1;
-  return `${names[idx] ?? month} ${year?.slice(2) ?? ""}`;
+  return `${MONTH_NAMES[idx] ?? month} ${year ?? ""}`;
+}
+
+/** "2026-04" -> "2026". Used on a multi-year time axis, where a month name
+ *  beside a year reads as a date rather than a period marker. */
+export function formatYearLabel(iso: string): string {
+  return iso.split("-")[0] ?? iso;
 }

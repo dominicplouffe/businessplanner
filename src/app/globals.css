@@ -29,6 +29,7 @@
   --color-ink-300: #b8c0ce;
   --color-ink-400: #9ba3b3;
   --color-ink-500: #818b9d;
+  --color-ink-550: #5f697d;
   --color-ink-600: #657086;
   --color-ink-700: #485060;
   --color-ink-800: #2e3440;
@@ -107,7 +108,9 @@
 
   --text-primary: var(--color-ink-950);
   --text-secondary: var(--color-ink-700);
-  --text-tertiary: var(--color-ink-500);
+  /* ink-550 measures 5.29:1 on paper and 4.98:1 on the sunken surface. ink-500
+     was 3.29:1 and ink-600 lands at 4.49:1 on sunken — just under AA. */
+  --text-tertiary: var(--color-ink-550);
   --text-inverse: var(--color-paper);
   --text-accent: var(--color-emerald-700);
 
