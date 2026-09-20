@@ -56,29 +56,43 @@ export function buildAssumptions(
       ...(annualRaise > 0 ? { annualRaiseRate: annualRaise } : {}),
     },
   ];
-  if (staffCount > 0) {
-    /* Staff that grow with the work, when the owner says the business needs
-       them to. The flat alternative is what produced the reported plan: $4.3
-       trillion of revenue against $11,965 of salary, unchanged for five years,
-       because headcount was a constant nobody related to volume. */
-    const scales = str(state, "team.staffScaleWithVolume", "no") === "yes";
-    const perHead = num(state, "team.volumePerStaffMember", 0);
-    const maxStaff = num(state, "team.maxStaffCount", 0);
+  /* Staff that grow with the work, when the owner says the business needs
+     them to. The flat alternative is what produced the reported plan: $4.3
+     trillion of revenue against $11,965 of salary, unchanged for five years,
+     because headcount was a constant nobody related to volume.
 
+     The condition below used to be `staffCount > 0` alone, and that was wrong
+     in the most common case there is. `team.staffCount` is how many people
+     exist on *day one*; it is optional and defaults to zero. So a business
+     that starts alone and hires as it grows — which is what "more customers
+     means more staff" describes — had its whole payroll discarded, along with
+     the two answers it had just given about how many people it would need.
+     One user drove it to $2.55M of year-five revenue on a single owner. */
+  const scales = str(state, "team.staffScaleWithVolume", "no") === "yes";
+  const perHead = num(state, "team.volumePerStaffMember", 0);
+  const maxStaff = num(state, "team.maxStaffCount", 0);
+  const willHire = scales && perHead > 0;
+
+  if (staffCount > 0 || willHire) {
     roles.push({
       id: "staff",
       title: staffAreDirect ? "Delivery staff" : "Support staff",
-      count: staffCount,
+      // A schema placeholder when the business starts with nobody: RoleSchema
+      // requires at least one. It changes no arithmetic — the engine ignores
+      // `count` entirely for a role that carries a staffing rule, and
+      // `minCount` below is the real floor.
+      count: Math.max(1, staffCount),
       annualSalary: num(state, "team.staffAverageSalary", 0),
       startMonth: firstTradingMonth,
       isDirectLabour: staffAreDirect,
-      ...(scales && perHead > 0
+      ...(willHire
         ? {
             staffing: {
               driver: "stream-volume" as const,
               streamId: "primary",
               perHead,
-              // Never fewer than the team they said they are starting with.
+              // Never fewer than the team they said they are starting with,
+              // which is legitimately nobody until the work arrives.
               minCount: staffCount,
               ...(maxStaff > 0 ? { maxCount: Math.max(maxStaff, staffCount) } : {}),
             },

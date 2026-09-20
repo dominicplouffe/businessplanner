@@ -188,7 +188,15 @@ export function buildModel(input: AssumptionsInput | Assumptions): FinancialMode
     if (i < 0) return 0;
     if (rule.driver === "revenue") return at(revenue, i);
     const stream = streams.find((s) => s.id === rule.streamId);
-    if (!stream) return 0;
+    if (!stream) {
+      // Returning 0 would pin headcount at the floor and read as a deliberate
+      // plan to hire nobody. A staffing rule naming a stream that does not
+      // exist is a wiring error, and it should say so.
+      throw new Error(
+        `Role staffing references stream "${rule.streamId}", which this plan does not have. ` +
+          `Available: ${streams.map((s) => s.id).join(", ") || "none"}.`,
+      );
+    }
     return rule.driver === "billable-heads"
       ? at(stream.billableHeads ?? [], i)
       : at(stream.volume, i);
@@ -212,7 +220,11 @@ export function buildModel(input: AssumptionsInput | Assumptions): FinancialMode
         // person, and rounding up is the conservative direction in a document
         // a lender reads.
         const needed = Math.ceil(work / rule.perHead / rule.stepSize) * rule.stepSize;
-        heads = Math.max(rule.minCount, Math.min(needed, rule.maxCount ?? Infinity));
+        // The floor is applied first and the ceiling last, so a rule whose
+        // floor sits above its ceiling cannot quietly exceed the maximum the
+        // plan states. The mapper cannot produce that pair, but a hand-built
+        // one could, and "never more than eight" has to mean it.
+        heads = Math.min(Math.max(needed, rule.minCount), rule.maxCount ?? Infinity);
         if (rule.ratchet) heads = ratchet = Math.max(ratchet, heads);
       }
 

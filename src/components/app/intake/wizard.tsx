@@ -9,6 +9,7 @@ import { buildAssumptions, type IntakeState, type ProvenanceState } from "@/lib/
 import { saveIntakeAction } from "@/lib/actions/plan-actions";
 import { buildModel } from "@/lib/finance/engine";
 import { computeMetrics } from "@/lib/finance/metrics";
+import { validateModel } from "@/lib/finance/validate";
 import { formatCurrency, formatMultiple } from "@/lib/finance/format";
 import { Button } from "@/components/ui/button";
 import { Eyebrow } from "@/components/ui/eyebrow";
@@ -513,10 +514,34 @@ function ReviewStep({
 }) {
   const result = useMemo(() => {
     try {
-      const model = buildModel(buildAssumptions(state, provenance));
-      return { model, metrics: computeMetrics(model), error: null as string | null };
+      const assumptions = buildAssumptions(state, provenance);
+      const model = buildModel(assumptions);
+      const metrics = computeMetrics(model);
+      /* The validator runs here too.
+
+         It used to run only once the plan existed — on the plan, review and
+         export pages — so this screen showed the figures an author's answers
+         produce with nothing attached to them. Somebody whose model billed
+         $2.55M a year on one person was told "here is what your answers
+         produce" and shown it without comment. The findings that matter are
+         computed from the same model on the same screen; withholding them
+         until the next page serves nobody.
+
+         Only what the answers themselves can cause is shown. The purpose is
+         internal here, which switches off the four blockers about competitors,
+         sourcing and the downside case — those are about a document that has
+         not been written yet, and listing them now would be noise. */
+      const findings = validateModel(model, metrics, { purpose: "internal" }).findings.filter(
+        (f) => f.severity === "blocking",
+      );
+      return { model, metrics, findings, error: null as string | null };
     } catch (error) {
-      return { model: null, metrics: null, error: error instanceof Error ? error.message : "Could not build the model." };
+      return {
+        model: null,
+        metrics: null,
+        findings: [],
+        error: error instanceof Error ? error.message : "Could not build the model.",
+      };
     }
   }, [state, provenance]);
 
@@ -536,6 +561,28 @@ function ReviewStep({
         that will sit behind the finished plan. Go back and change anything that
         looks wrong.
       </p>
+
+      {result.findings.length > 0 ? (
+        <section
+          aria-labelledby="intake-findings"
+          className="mt-8 rounded-lg border border-critical/40 bg-critical/5 p-5"
+        >
+          <h2 id="intake-findings" className="text-sm font-medium text-primary">
+            {result.findings.length === 1
+              ? "One thing here will stop this plan being sent"
+              : `${result.findings.length} things here will stop this plan being sent`}
+          </h2>
+          <ul className="mt-3 space-y-3">
+            {result.findings.map((finding) => (
+              <li key={finding.id}>
+                <p className="text-sm text-primary">{finding.title}</p>
+                <p className="mt-0.5 text-sm leading-relaxed text-secondary">{finding.detail}</p>
+                <p className="mt-0.5 text-sm leading-relaxed text-tertiary">{finding.remedy}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {result.error ? (
         <p role="alert" className="mt-8 rounded-sm border border-critical/40 bg-critical/5 px-4 py-3 text-sm text-critical">
