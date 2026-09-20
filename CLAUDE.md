@@ -43,6 +43,33 @@ Section 179 limits, the FICA wage base — all live in
 `confidence` field. Read them through `inForce()`. This is not hypothetical: SOP
 50 10 8.1 takes effect 2026-10-01, and the EB-5 thresholds adjust 2027-01-01.
 
+**Growth has a ceiling, always.** `src/lib/finance/growth.ts` projects volume
+logistically toward a capacity the author has to name, and every stream carries
+a `GrowthCurve`. A constant rate compounded for sixty months is what produced
+$4.3 trillion of year-five revenue on one employee, and it validated clean
+because every cost line is a percentage of revenue so the margins stayed in
+band at any scale. The ceiling decides year five; the rate only decides how
+fast you get there. `unbounded` exists as a declared shape purely so the
+validator can name it back — it is a blocking finding, not an option.
+
+Three things about that module are load-bearing. It is written with `Math.pow`
+and never `Math.exp` or `Math.log`, because `xlsx.ts` emits the same projection
+as a live Excel formula and the evaluator has `POWER` and no `EXP` — the
+TypeScript and the spreadsheet have to be the same expression. The intrinsic
+rate is *solved for* so the first month grows at exactly the rate the author
+typed; feeding the rate in directly gives 6.2% to someone who asked for 8%. And
+the degenerate cases are branches rather than guards: a negative rate declines
+geometrically rather than accelerating into a floor, and a business above its
+ceiling reverts to it, which is where the textbook logistic has a pole and
+returns negative revenue around month 46.
+
+**Payroll follows the business.** The loaded cost is computed inside the month
+loop, roles carry a raise indexed from their own start month, and a role can
+derive its headcount from volume. Heads round *up* and ratchet by default —
+without the ratchet a seasonal business dismisses its crew every February.
+`hourly-services` used to grow billable heads to produce revenue and charge
+nothing for them; a role staffed by `billable-heads` now pays for them.
+
 **Round at the edge, never in the ledger.** Rounding inside the amortisation
 schedule once made principal repayments differ from the amount drawn, which broke
 the balance sheet. `roundScheduleForDisplay()` exists for presentation; the model
@@ -312,6 +339,12 @@ this is a cleanup, not a hole.
 
 Regulatory values marked `confidence: "unverified"` must not be presented to a
 user as authoritative. See `CONFIG_VINTAGE.verificationQueue`.
+
+`revenuePerEmployee` exists on only two of the twenty-one benchmarks, so the
+revenue-per-employee rule blocks on an absolute sanity bound and warns only
+where a sourced band exists. Populating the other nineteen needs real sources,
+not estimates — a band that names no source is the thing this project does not
+do.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
