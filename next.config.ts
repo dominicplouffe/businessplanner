@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
+  // A self-contained server bundle with only the dependencies it actually
+  // reaches, which is what the container copies. Without it the image carries
+  // the whole node_modules tree, Chromium included twice over.
+  output: "standalone",
   reactStrictMode: true,
   poweredByHeader: false,
   // typedRoutes is deliberately off until the route surface is complete.

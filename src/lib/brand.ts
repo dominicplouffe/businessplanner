@@ -1,14 +1,18 @@
+import { siteUrl } from "./env";
+
 /**
  * Single source of truth for brand identity.
  *
- * The name and domain are placeholders pending a final decision, so every
- * user-visible reference reads from here — a rename is one edit to this file.
+ * Every user-visible reference reads from here — a rename is one edit to this
+ * file. The URL is environment-driven because a staging deployment that
+ * advertises production canonicals and sitemap entries is worse than useless
+ * to a search engine.
  */
 export const brand = {
   name: "Venturally",
   legalName: "Venturally, Inc.",
-  domain: "getventurely.com",
-  url: "https://getventurely.com",
+  domain: siteUrl.replace(/^https?:\/\//, ""),
+  url: siteUrl,
   tagline: "The business plan your lender actually reads.",
   description:
     "Venturally builds investor- and lender-grade business plans on a real financial model — every number computed, every claim cited, every figure reconciled to the statements.",

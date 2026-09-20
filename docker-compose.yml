@@ -1,0 +1,44 @@
+# Production-shaped local run: the real image, a real Postgres, real migrations.
+#
+#   docker compose up --build
+#
+# This is the rehearsal for the deploy. If the container boots here, applies its
+# migrations and serves /api/health, the only things left that can differ in AWS
+# are the secrets and the network — which is the point of running it.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_USER: venturally
+      POSTGRES_DB: venturally
+    ports: ["55432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U venturally"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_SITE_URL: http://localhost:3000
+    depends_on:
+      db: { condition: service_healthy }
+    ports: ["3000:3000"]
+    environment:
+      DATABASE_URL: postgresql://venturally:devpass@db:5432/venturally
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      BETTER_AUTH_URL: http://localhost:3000
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-development-secret-change-me}
+      # Both required, because the app refuses to start in production without
+      # them rather than falling back to a provider that grants entitlements
+      # for free. Use `stripe listen` keys for a realistic rehearsal.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_placeholder}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_placeholder}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+volumes:
+  pgdata:

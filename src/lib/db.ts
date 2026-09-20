@@ -1,14 +1,22 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { databaseKind, databaseUrl } from "./env";
 
 /**
  * Prisma 7 takes a driver adapter rather than a connection URL in the schema.
- * That is what lets one schema serve SQLite locally and Postgres in production:
- * swap the adapter here and run `pnpm db:provider postgresql`.
+ * That is what lets one schema serve SQLite locally and Postgres in production.
+ *
+ * The adapter is chosen from the URL rather than from a separate flag, so there
+ * is one thing to get right instead of two that can disagree. `pnpm db:provider
+ * postgresql` rewrites the schema's provider line to match before generating.
  */
 function createClient() {
-  const url = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
-  const adapter = new PrismaBetterSqlite3({ url });
+  const adapter =
+    databaseKind === "postgres"
+      ? new PrismaPg({ connectionString: databaseUrl })
+      : new PrismaBetterSqlite3({ url: databaseUrl });
+
   return new PrismaClient({
     adapter,
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],

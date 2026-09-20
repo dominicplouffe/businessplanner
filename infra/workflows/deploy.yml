@@ -1,0 +1,115 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      imageTag:
+        description: "Image tag to deploy (defaults to this commit)"
+        required: false
+
+concurrency:
+  group: deploy-production
+  # Deploys queue rather than cancel: cancelling one mid-rollout leaves the
+  # service half-updated, which is worse than waiting.
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  DOMAIN_NAME: getventuraly.com
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # The same checks a contributor runs, before anything is built or pushed.
+  # A deploy that ships a failing test suite is a deploy that should not have
+  # started.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # No access keys anywhere. If both a role and keys are present the
+          # action signs with the keys and the OIDC trust policy is bypassed
+          # silently, so only the role is configured.
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - name: Build and push the image
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ github.event.inputs.imageTag || github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE="$REGISTRY/venturally:$TAG"
+          docker build \
+            --build-arg NEXT_PUBLIC_SITE_URL="https://${DOMAIN_NAME}" \
+            --tag "$IMAGE" \
+            --tag "$REGISTRY/venturally:latest" \
+            .
+          docker push "$IMAGE"
+          docker push "$REGISTRY/venturally:latest"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy the stack
+        working-directory: infra
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          npm ci
+          npx cdk deploy VenturallyCertificate VenturallySite \
+            --require-approval never \
+            --context domainName="${DOMAIN_NAME}" \
+            --context imageTag="${IMAGE_TAG}"
+
+      - name: Wait for the service to stabilise
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$(aws cloudformation describe-stacks --stack-name VenturallySite \
+                 --query "Stacks[0].Outputs[?OutputKey=='ClusterName'].OutputValue" --output text)" \
+            --services "$(aws cloudformation describe-stacks --stack-name VenturallySite \
+                 --query "Stacks[0].Outputs[?OutputKey=='ServiceName'].OutputValue" --output text)"
+
+      - name: Invalidate the edge cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "$(aws cloudformation describe-stacks --stack-name VenturallySite \
+                 --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" --output text)" \
+            --paths "/*"
+
+      - name: Check the deployed site answers
+        run: |
+          for i in $(seq 1 20); do
+            if curl -fsS "https://${DOMAIN_NAME}/api/health" >/dev/null; then
+              echo "healthy"; exit 0
+            fi
+            echo "not yet ($i/20)"; sleep 15
+          done
+          echo "The site did not become healthy." >&2
+          exit 1

@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.github
+infra/node_modules
+infra/cdk.out
+prisma/dev.db
+prisma/dev.db-journal
+tests/e2e
+*.md
+!prisma/migrations/README.md
+.env
+.env.local

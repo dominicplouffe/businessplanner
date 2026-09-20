@@ -1,0 +1,22 @@
+{
+  "name": "venturally-infra",
+  "version": "0.1.0",
+  "private": true,
+  "bin": { "infra": "bin/infra.js" },
+  "scripts": {
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy",
+    "bootstrap": "cdk bootstrap"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.190.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "aws-cdk": "2.1029.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "@types/node": "^22.18.1"
+  }
+}

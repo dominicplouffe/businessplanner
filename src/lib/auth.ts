@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { db } from "./db";
+import { databaseKind, siteUrl } from "./env";
 
 /**
  * Email and password only for now. OAuth providers and the organization plugin
@@ -9,14 +10,17 @@ import { db } from "./db";
  * touching call sites.
  */
 export const auth = betterAuth({
-  database: prismaAdapter(db, { provider: "sqlite" }),
+  // Follows the database the adapter actually connected to, so the two
+  // cannot disagree about which dialect is in use.
+  database: prismaAdapter(db, { provider: databaseKind === "postgres" ? "postgresql" : "sqlite" }),
   secret: process.env.BETTER_AUTH_SECRET,
-  baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
+  baseURL: process.env.BETTER_AUTH_URL ?? siteUrl,
   // Development is reached on both hostnames; production uses the real origin.
   trustedOrigins: [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    ...(process.env.NEXT_PUBLIC_SITE_URL ? [process.env.NEXT_PUBLIC_SITE_URL] : []),
+    ...(process.env.NODE_ENV === "production"
+      ? []
+      : ["http://localhost:3000", "http://127.0.0.1:3000"]),
+    siteUrl,
   ],
 
   emailAndPassword: {
