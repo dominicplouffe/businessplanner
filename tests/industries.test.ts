@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { INDUSTRY_PAGES, benchmarkFor, getIndustryPage, industriesByDemand } from "@/lib/content/industries";
+import {
+  INDUSTRY_PAGES,
+  benchmarkFor,
+  getIndustryPage,
+  industriesByDemand,
+  industriesBySector,
+} from "@/lib/content/industries";
+import { buildIndustryExample } from "@/lib/content/industry-example";
 import { INDUSTRY_BENCHMARKS } from "@/lib/finance/benchmarks";
 import { buildModel } from "@/lib/finance/engine";
 import { computeMetrics } from "@/lib/finance/metrics";
@@ -154,4 +161,54 @@ describe("benchmark bands — internal coherence", () => {
       expect(bm.grossMargin.median).toBeLessThanOrEqual(bm.grossMargin.high);
     });
   }
+});
+
+describe("the worked example rendered on a page", () => {
+  const examples = INDUSTRY_PAGES.map((page) => ({ page, example: buildIndustryExample(page) }));
+
+  it("describes every driver of every revenue stream", () => {
+    for (const { page, example } of examples) {
+      expect(example.streams.length, page.slug).toBe(page.build().revenueStreams?.length ?? 0);
+      for (const stream of example.streams) {
+        expect(stream.drivers.length, `${page.slug}/${stream.name}`).toBeGreaterThan(2);
+        for (const d of stream.drivers) {
+          expect(d.value, `${page.slug}/${d.label}`).not.toContain("NaN");
+          expect(d.value.length).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it("carries full-horizon series for the chart, aligned to the labels", () => {
+    for (const { page, example } of examples) {
+      expect(example.chart.labels.length, page.slug).toBe(60);
+      expect(example.chart.revenue.length).toBe(60);
+      expect(example.chart.ebitda.length).toBe(60);
+    }
+  });
+
+  it("reports the same figures the page prints as claims", () => {
+    for (const { page, example } of examples) {
+      // These two drive user-visible claims — "balance sheet ties in all 60
+      // periods", "this model would export" — so they must be true, not merely
+      // rendered.
+      expect(example.figures.balanceSheetTies, page.slug).toBe(true);
+      expect(example.figures.blockingCount, page.slug).toBe(0);
+      expect(example.figures.year3Revenue, page.slug).toBeGreaterThan(example.figures.year1Revenue);
+      expect(example.figures.year3Headcount, page.slug).toBeGreaterThan(0);
+    }
+  });
+
+  it("only claims a coverage ratio where the example actually carries debt", () => {
+    for (const { page, example } of examples) {
+      const hasDebt = example.figures.totalDebt > 0;
+      expect(example.figures.dscrFirstFullYear !== null, page.slug).toBe(hasDebt);
+    }
+  });
+
+  it("places every page in exactly one sector section", () => {
+    const grouped = industriesBySector().flatMap((s) => s.pages.map((p) => p.slug));
+    expect(grouped.length).toBe(INDUSTRY_PAGES.length);
+    expect(new Set(grouped).size).toBe(INDUSTRY_PAGES.length);
+  });
 });

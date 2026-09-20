@@ -26,9 +26,37 @@ export type CostLine = {
   note: string;
 };
 
+/** The groupings the index page renders. Held here so the index cannot drift
+ *  out of step with the page list — the same rule nav.ts follows. */
+export const INDUSTRY_SECTORS = [
+  {
+    key: "food-drink",
+    heading: "Food and drink",
+    blurb: "Thin net margins, heavy fit-out, and a reader who knows the prime-cost rule.",
+  },
+  {
+    key: "trades",
+    heading: "Trades and services",
+    blurb: "Labour is the cost of sale, and the receivable cycle is what actually strains the plan.",
+  },
+  {
+    key: "place",
+    heading: "Property, care and capacity",
+    blurb: "Capacity is capped — by rooms, by ratios, by machines — so the build has to respect it.",
+  },
+  {
+    key: "online",
+    heading: "Online and professional",
+    blurb: "No premises, but unit economics and utilisation get read forensically instead.",
+  },
+] as const;
+
+export type IndustrySector = (typeof INDUSTRY_SECTORS)[number]["key"];
+
 export type IndustryPage = {
   slug: string;
   label: string;
+  sector: IndustrySector;
   /** The H1. Written as the answer to the query, not as a category name. */
   title: string;
   /** The search this page exists to answer, verbatim. */
@@ -66,6 +94,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
   /* ---- Food and drink ------------------------------------------------- */
   {
     slug: "food-truck",
+    sector: "food-drink",
     label: "Food truck",
     title: "A food truck business plan a lender will actually underwrite",
     query: "food truck business plan",
@@ -140,6 +169,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
 
   {
     slug: "coffee-shop",
+    sector: "food-drink",
     label: "Coffee shop",
     title: "A coffee shop business plan built on covers, not optimism",
     query: "coffee shop business plan",
@@ -213,6 +243,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
 
   {
     slug: "restaurant",
+    sector: "food-drink",
     label: "Restaurant",
     title: "A restaurant business plan that survives an underwriter",
     query: "restaurant business plan",
@@ -296,6 +327,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
 
   {
     slug: "bakery",
+    sector: "food-drink",
     label: "Bakery",
     title: "A bakery business plan with a wholesale line that carries the rent",
     query: "bakery business plan",
@@ -377,6 +409,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
 
   {
     slug: "bar",
+    sector: "food-drink",
     label: "Bar",
     title: "A bar business plan where the licence is on the critical path",
     query: "bar business plan",
@@ -453,6 +486,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
   /* ---- Services and trades -------------------------------------------- */
   {
     slug: "cleaning",
+    sector: "trades",
     label: "Commercial cleaning",
     title: "A cleaning business plan built on contracts, not hours",
     query: "cleaning business plan",
@@ -535,6 +569,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
 
   {
     slug: "trucking",
+    sector: "trades",
     label: "Trucking",
     title: "A trucking business plan underwritten on revenue per mile",
     query: "trucking business plan",
@@ -614,6 +649,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
 
   {
     slug: "salon",
+    sector: "trades",
     label: "Hair salon",
     title: "A salon business plan built on chair utilisation",
     query: "salon business plan",
@@ -692,6 +728,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
 
   {
     slug: "landscaping",
+    sector: "trades",
     label: "Landscaping",
     title: "A landscaping business plan that survives the winter",
     query: "landscaping business plan",
@@ -778,6 +815,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
 
   {
     slug: "construction",
+    sector: "trades",
     label: "Construction",
     title: "A construction business plan where working capital is the real ask",
     query: "construction business plan",
@@ -858,6 +896,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
   /* ---- Care, property and retail -------------------------------------- */
   {
     slug: "daycare",
+    sector: "place",
     label: "Daycare",
     title: "A daycare business plan that starts from licensed capacity",
     query: "daycare business plan",
@@ -935,6 +974,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
 
   {
     slug: "laundromat",
+    sector: "place",
     label: "Laundromat",
     title: "A laundromat business plan built on turns per machine per day",
     query: "laundromat business plan",
@@ -1006,6 +1046,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
 
   {
     slug: "airbnb",
+    sector: "place",
     label: "Short-term rental",
     title: "A short-term rental business plan a lender will read past the first page",
     query: "airbnb business plan",
@@ -1079,6 +1120,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
 
   {
     slug: "ecommerce",
+    sector: "online",
     label: "E-commerce",
     title: "An e-commerce business plan where the unit economics come first",
     query: "ecommerce business plan",
@@ -1153,6 +1195,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
   /* ---- Professional ---------------------------------------------------- */
   {
     slug: "consulting",
+    sector: "online",
     label: "Consulting",
     title: "A consulting business plan that is not just a rate card",
     query: "consulting business plan",
@@ -1247,4 +1290,20 @@ export function benchmarkFor(page: IndustryPage): IndustryBenchmark {
 /** Most searched first, which is also the order they were worth building in. */
 export function industriesByDemand(): IndustryPage[] {
   return [...INDUSTRY_PAGES].sort((a, b) => b.demand.volume - a.demand.volume);
+}
+
+/** The index page's sections, most-searched first within each. */
+export function industriesBySector(): {
+  key: IndustrySector;
+  heading: string;
+  blurb: string;
+  pages: IndustryPage[];
+}[] {
+  const ranked = industriesByDemand();
+  return INDUSTRY_SECTORS.map((sector) => ({
+    key: sector.key,
+    heading: sector.heading,
+    blurb: sector.blurb,
+    pages: ranked.filter((page) => page.sector === sector.key),
+  }));
 }

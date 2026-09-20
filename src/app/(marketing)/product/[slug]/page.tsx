@@ -7,6 +7,7 @@ import { Eyebrow } from "@/components/ui/eyebrow";
 import { Section } from "@/components/ui/section";
 import { ButtonLink } from "@/components/ui/button";
 import { PRODUCT_PAGES, getProductPage } from "@/lib/content/product";
+import { brand } from "@/lib/brand";
 
 export function generateStaticParams() {
   return PRODUCT_PAGES.map((p) => ({ slug: p.slug }));
@@ -23,7 +24,7 @@ export async function generateMetadata({
   return {
     title: page.eyebrow,
     description: page.lede,
-    openGraph: { title: `${page.eyebrow} · Venturally`, description: page.lede },
+    openGraph: { title: `${page.eyebrow} · ${brand.name}`, description: page.lede },
   };
 }
 
