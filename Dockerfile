@@ -70,6 +70,26 @@ ARG NEXT_PUBLIC_SITE_URL=https://getventurely.com
 ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
 RUN pnpm build
 
+# ---- migrator -----------------------------------------------------------
+# The Prisma CLI, installed on its own with npm.
+#
+# It cannot be lifted out of the pnpm tree. pnpm's node_modules is a symlink
+# farm: `node_modules/prisma` points into the virtual store, and the CLI's own
+# dependencies sit beside it there rather than at the top level — so copying
+# `node_modules/prisma` into the runtime image produces a CLI that dies on
+# `Cannot find module '@prisma/config'`. npm's tree is flat, which is exactly
+# what a `COPY` can carry.
+#
+# The version is read from package.json so this cannot drift from the client the
+# build generated.
+FROM node:${NODE_VERSION}-bookworm-slim AS migrator
+WORKDIR /migrate
+COPY package.json ./app-package.json
+RUN PRISMA_VERSION="$(node -p "require('./app-package.json').dependencies.prisma")" \
+    && npm init -y > /dev/null \
+    && npm install --no-audit --no-fund "prisma@${PRISMA_VERSION}" \
+    && rm ./app-package.json
+
 # ---- runtime ------------------------------------------------------------
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
 WORKDIR /app
@@ -101,10 +121,15 @@ COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
 
 # Migrations are applied by the entrypoint, so the schema, the migration files
-# and a Prisma CLI have to be present at run time — not just at build time.
+# and a Prisma CLI have to be present at run time — not just at build time. The
+# CLI comes from the migrator stage and keeps its own tree under /app/migrate, so
+# it cannot be confused with the client the server uses.
 COPY --from=build /app/prisma ./prisma
-COPY --from=build /app/prisma.config.ts ./prisma.config.ts
-COPY --from=build /app/node_modules/prisma ./node_modules/prisma
+COPY docker/prisma.config.js ./prisma.config.js
+COPY --from=migrator /migrate/node_modules ./migrate/node_modules
+# The server's own Prisma packages. Output tracing bundles the adapter into the
+# server chunks rather than leaving it in node_modules, so this is what makes
+# `@prisma/adapter-pg` resolvable if it is reached at run time.
 COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma
 COPY docker-entrypoint.sh /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint

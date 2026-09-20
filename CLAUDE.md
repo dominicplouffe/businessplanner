@@ -261,6 +261,16 @@ rather than the mismatch, which sends you looking in the wrong place.
 entrypoint before it binds a port, so a failed migration stops the task rather
 than serving traffic against a schema it does not match.
 
+That CLI is installed separately, with npm, in the image's `migrator` stage, and
+lives in its own tree at `/app/migrate`. It cannot be copied out of the pnpm
+tree: pnpm's `node_modules` is a symlink farm, and the CLI's own dependencies sit
+beside it in the virtual store rather than at the top level, so a `COPY` of
+`node_modules/prisma` yields a CLI that dies on `Cannot find module
+'@prisma/config'`. For the same reason the image ships `docker/prisma.config.js`
+in place of the repository's `prisma.config.ts` — a `.ts` config needs the
+TypeScript compiler, and `dotenv` has no business in a runtime image whose
+environment comes from the task definition.
+
 `instrumentation.ts` calls the boot guard, which is why a missing Stripe key is
 a startup failure rather than a runtime fallback to `DevBilling`.
 

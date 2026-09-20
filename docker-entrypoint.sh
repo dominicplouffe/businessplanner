@@ -8,7 +8,9 @@ set -e
 
 if [ -n "$DATABASE_URL" ]; then
   echo "Applying migrations…"
-  node_modules/prisma/build/index.js migrate deploy
+  # The CLI has its own flat dependency tree — see the migrator stage in the
+  # Dockerfile for why it cannot share the server's.
+  node migrate/node_modules/prisma/build/index.js migrate deploy
 else
   echo "DATABASE_URL is not set; refusing to start." >&2
   exit 1

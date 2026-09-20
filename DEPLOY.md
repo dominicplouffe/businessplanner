@@ -237,6 +237,13 @@ adapter from that variable, so an unset one selects the SQLite adapter and every
 route importing the client fails page-data collection with
 `not compatible with the provider`. The placeholder is never connected to.
 
+If the container starts, says `Applying migrations…` and then dies on
+`Cannot find module '@prisma/config'`, the `migrator` stage has gone missing.
+The Prisma CLI that the entrypoint runs is installed separately with npm and
+lives at `/app/migrate`, because a pnpm-installed CLI cannot be copied between
+images — its dependencies live in the virtual store beside it, not at the top
+level of `node_modules`.
+
 ---
 
 ## Verifying it worked
