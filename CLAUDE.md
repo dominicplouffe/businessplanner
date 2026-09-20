@@ -147,6 +147,36 @@ Keep `SYSTEM_PROMPT` byte-stable — it carries the cache breakpoint, so a date 
 a reordered rule invalidates the cached prefix on every request. Per-plan content
 goes in the user message, after the breakpoint.
 
+## Exports
+
+`src/lib/export/document.ts` assembles one document; `pdf.ts`, `xlsx.ts`,
+`docx.ts` and `pptx.ts` each render it. Four builders reading four different
+assemblies is how a spreadsheet ends up disagreeing with the PDF exported
+beside it, so none of them touches a plan directly.
+
+**The workbook is the model, not a picture of it.** The statements are formulas
+over a Drivers sheet, so changing a driver recalculates revenue, margin,
+coverage and the debt schedule. `exceljs` writes formulas but never evaluates
+them, which means a wrong formula ships looking perfect — so
+`tests/helpers/xlsx-eval.ts` is a small evaluator covering exactly the subset
+the exporter emits, and `tests/xlsx.test.ts` checks every month of the P&L
+against the engine. It has already caught an off-by-one that zeroed interest
+from month two onward. If you emit a new Excel function, teach the evaluator
+about it — it throws on anything unknown rather than returning zero.
+
+The **Filed** sheet is the workbook's tie row: the engine's figures at export,
+and a variance row subtracting them from the live formulas. Zero on open, or
+the workbook and the plan disagree.
+
+PDF renders the live `/print/[planId]` route through Chromium with the caller's
+own cookies, so it is not a privileged path around authorisation and the
+preview is what the reader receives. `CHROMIUM_EXECUTABLE_PATH` overrides the
+browser when the installed one does not match Playwright's expected build.
+
+`src/styles/print.css` is shared by the print route **and** `/share/[token]` —
+they render the same document, and the shared plan is what investors actually
+read. It was briefly shipped unstyled because only the print layout imported it.
+
 ## Known gaps
 
 `typedRoutes` is off until the route surface is complete — nav data points at

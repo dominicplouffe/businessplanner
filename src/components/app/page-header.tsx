@@ -22,7 +22,7 @@ export function AppPageHeader({
           <h1 className="text-display-sm sm:text-display-md">{title}</h1>
           {lede ? <p className="mt-3 leading-relaxed text-secondary">{lede}</p> : null}
         </div>
-        {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
+        {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
       </div>
     </header>
   );

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowRight, ClipboardCheck, LineChart, Pencil, Target } from "lucide-react";
+import { ArrowRight, Download, Pencil } from "lucide-react";
 import { AppPageHeader } from "@/components/app/page-header";
 import { ButtonLink } from "@/components/ui/button";
 import { requireUser, getOrCreateWorkspace } from "@/lib/session";
@@ -61,17 +61,12 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
         }
         actions={
           <>
-            <ButtonLink href={`/plans/${plan.id}/financials`} variant="secondary">
-              <LineChart aria-hidden className="size-4" />
-              Financials
-            </ButtonLink>
-            <ButtonLink href={`/plans/${plan.id}/market`} variant="secondary">
-              <Target aria-hidden className="size-4" />
-              Market
-            </ButtonLink>
-            <ButtonLink href={`/plans/${plan.id}/review`} variant="secondary">
-              <ClipboardCheck aria-hidden className="size-4" />
-              Review
+            {/* The sidebar carries the full sub-nav, and the body links
+                through to financials and review — five buttons here just made
+                the header wrap badly on a tablet. */}
+            <ButtonLink href={`/plans/${plan.id}/export`} variant="secondary">
+              <Download aria-hidden className="size-4" />
+              Export and share
             </ButtonLink>
             <ButtonLink href={`/plans/${plan.id}/intake`} variant="secondary">
               <Pencil aria-hidden className="size-4" />
