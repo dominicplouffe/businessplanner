@@ -1,3 +1,8 @@
+import { INTAKE_STEPS, REVENUE_MODELS } from "@/lib/content/intake";
+import type { IntakeState } from "@/lib/content/intake-mapper";
+import { defaultsForIndustry } from "@/lib/content/intake-defaults";
+import { buildAssumptions } from "@/lib/content/intake-mapper";
+import { AssumptionsSchema } from "@/lib/finance/types";
 import { describe, expect, it } from "vitest";
 import { TOOL_PAGES, getToolPage, toolsByDemand } from "@/lib/content/tools";
 import { buildAmortisation, levelPayment } from "@/lib/finance/loans";
@@ -96,6 +101,68 @@ describe("what the calculators compute", () => {
     for (const step of r.steps) {
       expect(step.label.length).toBeGreaterThan(0);
       expect(["count", "percent", "currency"]).toContain(step.kind);
+    }
+  });
+});
+
+/* ==========================================================================
+   The questionnaire cannot produce an unbounded plan.
+   --------------------------------------------------------------------------
+   The engine refuses one and the validator blocks one, but the intake is where
+   the reported plan was actually typed: a percent field that accepted 50 and a
+   mapper that turned it into sixty months of compounding.
+   ========================================================================== */
+describe("intake — every model it can build declares its limits", () => {
+  const answeredFor = (kind: string) => {
+    const seeds = defaultsForIndustry("other");
+    const state: IntakeState = {
+      ...seeds,
+      "company.name": "Test",
+      "company.industryKey": "other",
+      "company.purpose": "internal",
+      "company.startDate": "2026-01",
+      "company.firstTradingMonth": 1,
+      "context.description": "A business.",
+      "rev.kind": kind,
+    };
+    // Whatever this model asks for, answered from the seeds for that model.
+    const revenueStep = INTAKE_STEPS.find((s) => s.key === "revenue")!;
+    for (const field of revenueStep.fields(state)) {
+      if (state[field.key] === undefined) state[field.key] = 1;
+    }
+    return state;
+  };
+
+  it.each(REVENUE_MODELS.map((m) => m.kind))("bounds a %s plan", (kind) => {
+    const assumptions = AssumptionsSchema.parse(buildAssumptions(answeredFor(kind), {}));
+    const stream = assumptions.revenueStreams[0]!;
+    expect(stream.growth, kind).toBeDefined();
+    expect(stream.growth!.shape, kind).not.toBe("unbounded");
+  });
+
+  it("asks for the capacity of every model that can compound", () => {
+    // A model whose growth is a rate must ask what limits it. Contract books
+    // plateau on their own and hourly services are limited by people, both of
+    // which are asked for in their own words.
+    const revenueStep = INTAKE_STEPS.find((s) => s.key === "revenue")!;
+    for (const model of REVENUE_MODELS) {
+      const keys = revenueStep.fields({ "rev.kind": model.kind }).map((f) => f.key);
+      const compounds = keys.some((k) => /GrowthRate$/.test(k));
+      if (!compounds) continue;
+      const bounded = keys.some((k) => /capacity|Ceiling/i.test(k));
+      expect(bounded, `${model.kind} asks for a rate but not a ceiling`).toBe(true);
+    }
+  });
+
+  it("refuses a growth rate that compounds to nonsense", () => {
+    // 50% a month is 12,900% a year. The old field accepted it; the schema
+    // that the intake maps into now does not.
+    const revenueStep = INTAKE_STEPS.find((s) => s.key === "revenue")!;
+    for (const model of REVENUE_MODELS) {
+      for (const field of revenueStep.fields({ "rev.kind": model.kind })) {
+        if (!/GrowthRate$/.test(field.key)) continue;
+        expect(field.max, `${model.kind}.${field.key}`).toBeLessThanOrEqual(25);
+      }
     }
   });
 });

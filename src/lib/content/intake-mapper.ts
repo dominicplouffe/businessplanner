@@ -44,6 +44,7 @@ export function buildAssumptions(
   const staffAreDirect = str(state, "team.staffAreDirect", "yes") === "yes";
 
   const revenueStream = buildStream(kind, state, firstTradingMonth, cogsPercent);
+  const annualRaise = pct(state, "team.annualRaise", 0);
 
   const roles: NonNullable<AssumptionsInput["roles"]> = [
     {
@@ -52,9 +53,18 @@ export function buildAssumptions(
       annualSalary: num(state, "team.ownerSalary", 0),
       isOwner: true,
       startMonth: 1,
+      ...(annualRaise > 0 ? { annualRaiseRate: annualRaise } : {}),
     },
   ];
   if (staffCount > 0) {
+    /* Staff that grow with the work, when the owner says the business needs
+       them to. The flat alternative is what produced the reported plan: $4.3
+       trillion of revenue against $11,965 of salary, unchanged for five years,
+       because headcount was a constant nobody related to volume. */
+    const scales = str(state, "team.staffScaleWithVolume", "no") === "yes";
+    const perHead = num(state, "team.volumePerStaffMember", 0);
+    const maxStaff = num(state, "team.maxStaffCount", 0);
+
     roles.push({
       id: "staff",
       title: staffAreDirect ? "Delivery staff" : "Support staff",
@@ -62,6 +72,18 @@ export function buildAssumptions(
       annualSalary: num(state, "team.staffAverageSalary", 0),
       startMonth: firstTradingMonth,
       isDirectLabour: staffAreDirect,
+      ...(scales && perHead > 0
+        ? {
+            staffing: {
+              driver: "stream-volume" as const,
+              streamId: "primary",
+              perHead,
+              // Never fewer than the team they said they are starting with.
+              minCount: staffCount,
+              ...(maxStaff > 0 ? { maxCount: Math.max(maxStaff, staffCount) } : {}),
+            },
+          }
+        : {}),
     });
   }
 
@@ -154,6 +176,26 @@ function buildStream(
 ): NonNullable<AssumptionsInput["revenueStreams"]>[number] {
   const base = { id: "primary", startMonth, cogsPercent };
 
+  /* Every growing stream gets a ceiling.
+     
+     The curve is what stops a rate compounding for sixty months, and a stream
+     that declares no bound is a blocking finding — so the fallback when the
+     answer is missing is a ceiling derived from the starting level rather than
+     no ceiling at all. A guessed ceiling that the validator can flag as never
+     approached is recoverable; an unbounded model is the defect this whole
+     layer exists to prevent. */
+  const curve = (v0: number, key: string, fallbackMultiple: number) => {
+    const stated = num(s, key, 0);
+    return {
+      shape: "saturating" as const,
+      monthlyRate: pct(s, "rev.monthlyGrowthRate", 0),
+      ceiling: stated > 0 ? stated : Math.max(v0 * fallbackMultiple, 1),
+      // Price inflation on the capacity itself. Small on purpose: this is the
+      // one term that still runs past the horizon.
+      terminalAnnualRate: 0.02,
+    };
+  };
+
   switch (kind) {
     case "retail-footfall":
       return {
@@ -162,14 +204,31 @@ function buildStream(
         conversionRate: pct(s, "rev.conversionRate", 1),
         averageTicket: num(s, "rev.averageTicket"),
         openDaysPerMonth: num(s, "rev.openDaysPerMonth", 26),
-        monthlyGrowthRate: pct(s, "rev.monthlyGrowthRate", 0),
+        growth: curve(
+          num(s, "rev.dailyTraffic") * pct(s, "rev.conversionRate", 1) * num(s, "rev.openDaysPerMonth", 26),
+          "rev.capacityPerMonth",
+          1.5,
+        ),
       };
     case "subscription":
       return {
         ...base, kind, name: "Subscriptions",
         initialCustomers: num(s, "rev.initialCustomers", 0),
         newCustomersMonth1: num(s, "rev.newCustomersMonth1"),
-        newCustomerGrowthRate: pct(s, "rev.newCustomerGrowthRate", 0),
+        growth: {
+          shape: "saturating" as const,
+          monthlyRate: pct(s, "rev.newCustomerGrowthRate", 0),
+          ceiling: Math.max(
+            num(s, "rev.acquisitionCeiling", 0) || num(s, "rev.newCustomersMonth1") * 3,
+            1,
+          ),
+          terminalAnnualRate: 0.02,
+        },
+        // The stock ceiling, which is what a subscription author thinks in.
+        customerCeiling: Math.max(
+          num(s, "rev.customerCeiling", 0) || num(s, "rev.newCustomersMonth1") * 60,
+          1,
+        ),
         monthlyChurnRate: pct(s, "rev.monthlyChurnRate", 0),
         pricePerCustomerPerMonth: num(s, "rev.pricePerCustomerPerMonth"),
       };
@@ -177,7 +236,7 @@ function buildStream(
       return {
         ...base, kind, name: "Product sales",
         unitsMonth1: num(s, "rev.unitsMonth1"),
-        monthlyGrowthRate: pct(s, "rev.monthlyGrowthRate", 0),
+        growth: curve(num(s, "rev.unitsMonth1"), "rev.capacityPerMonth", 1.5),
         pricePerUnit: num(s, "rev.pricePerUnit"),
         costPerUnit: num(s, "rev.costPerUnit", 0),
         // An explicit unit cost supersedes the percentage.
@@ -190,7 +249,17 @@ function buildStream(
         hoursPerHeadPerMonth: num(s, "rev.hoursPerHeadPerMonth", 160),
         utilisation: pct(s, "rev.utilisation", 0.7),
         hourlyRate: num(s, "rev.hourlyRate"),
-        headcountGrowthPerMonth: num(s, "rev.headcountGrowthPerMonth", 0),
+        growth: {
+          shape: "linear" as const,
+          perMonth: num(s, "rev.headcountGrowthPerMonth", 0),
+          // Capped at the size the practice says it will reach, so the plan
+          // cannot bill for a consultant it never hires.
+          max: Math.max(
+            num(s, "rev.capacityHeadcount", 0) || num(s, "rev.billableHeadcount") * 2,
+            num(s, "rev.billableHeadcount"),
+            1,
+          ),
+        },
       };
     case "contract":
       return {
@@ -199,19 +268,22 @@ function buildStream(
         newContractsPerMonth: num(s, "rev.newContractsPerMonth"),
         monthlyValuePerContract: num(s, "rev.monthlyValuePerContract"),
         termMonths: Math.max(1, Math.round(num(s, "rev.termMonths", 12))),
+        // A contract book plateaus on its own: wins age out after the term, so
+        // it needs no ceiling and declaring one would be inventing a limit.
+        growth: { shape: "flat" as const },
       };
     case "marketplace":
       return {
         ...base, kind, name: "Marketplace",
         gmvMonth1: num(s, "rev.gmvMonth1"),
-        monthlyGrowthRate: pct(s, "rev.monthlyGrowthRate", 0),
+        growth: curve(num(s, "rev.gmvMonth1"), "rev.capacityPerMonth", 2),
         takeRate: pct(s, "rev.takeRate", 0),
       };
     case "advertising":
       return {
         ...base, kind, name: "Advertising",
         impressionsMonth1: num(s, "rev.impressionsMonth1"),
-        monthlyGrowthRate: pct(s, "rev.monthlyGrowthRate", 0),
+        growth: curve(num(s, "rev.impressionsMonth1"), "rev.capacityPerMonth", 2),
         fillRate: pct(s, "rev.fillRate", 0.7),
         cpm: num(s, "rev.cpm"),
       };
@@ -224,9 +296,16 @@ const PATH_BY_KEY: Record<string, string> = {
   "rev.conversionRate": "revenueStreams.0.conversionRate",
   "rev.averageTicket": "revenueStreams.0.averageTicket",
   "rev.openDaysPerMonth": "revenueStreams.0.openDaysPerMonth",
-  "rev.monthlyGrowthRate": "revenueStreams.0.monthlyGrowthRate",
+  "rev.monthlyGrowthRate": "revenueStreams.0.growth.monthlyRate",
+  "rev.capacityPerMonth": "revenueStreams.0.growth.ceiling",
+  "rev.capacityHeadcount": "revenueStreams.0.growth.max",
+  "rev.acquisitionCeiling": "revenueStreams.0.growth.ceiling",
+  "rev.customerCeiling": "revenueStreams.0.customerCeiling",
+  "team.annualRaise": "roles.owner.annualRaiseRate",
+  "team.volumePerStaffMember": "roles.staff.staffing.perHead",
+  "team.maxStaffCount": "roles.staff.staffing.maxCount",
   "rev.newCustomersMonth1": "revenueStreams.0.newCustomersMonth1",
-  "rev.newCustomerGrowthRate": "revenueStreams.0.newCustomerGrowthRate",
+  "rev.newCustomerGrowthRate": "revenueStreams.0.growth.monthlyRate",
   "rev.pricePerCustomerPerMonth": "revenueStreams.0.pricePerCustomerPerMonth",
   "rev.monthlyChurnRate": "revenueStreams.0.monthlyChurnRate",
   "rev.initialCustomers": "revenueStreams.0.initialCustomers",
@@ -237,7 +316,7 @@ const PATH_BY_KEY: Record<string, string> = {
   "rev.hourlyRate": "revenueStreams.0.hourlyRate",
   "rev.utilisation": "revenueStreams.0.utilisation",
   "rev.hoursPerHeadPerMonth": "revenueStreams.0.hoursPerHeadPerMonth",
-  "rev.headcountGrowthPerMonth": "revenueStreams.0.headcountGrowthPerMonth",
+  "rev.headcountGrowthPerMonth": "revenueStreams.0.growth.perMonth",
   "rev.initialContracts": "revenueStreams.0.initialContracts",
   "rev.newContractsPerMonth": "revenueStreams.0.newContractsPerMonth",
   "rev.monthlyValuePerContract": "revenueStreams.0.monthlyValuePerContract",

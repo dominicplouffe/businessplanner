@@ -30,22 +30,31 @@ const REVENUE_MODEL_BY_INDUSTRY: Record<string, RevenueStreamKind> = {
   other: "retail-footfall",
 };
 
+/* Every capacity seed is a plausible multiple of the starting level, so a
+   plan that is never edited still declares a bound rather than compounding
+   forever. They are tagged `benchmark_default` like every other seed, which is
+   what tells the reader the number came from us and not from the owner. */
 const REVENUE_SEEDS: Record<RevenueStreamKind, IntakeDefaults> = {
   "retail-footfall": {
     "rev.dailyTraffic": 150, "rev.conversionRate": 70, "rev.averageTicket": 18,
     "rev.openDaysPerMonth": 26, "rev.monthlyGrowthRate": 1,
+    // 150 × 70% × 26 = 2,730 transactions a month today; half as many again.
+    "rev.capacityPerMonth": 4000,
   },
   subscription: {
     "rev.newCustomersMonth1": 15, "rev.newCustomerGrowthRate": 5,
     "rev.pricePerCustomerPerMonth": 99, "rev.monthlyChurnRate": 3, "rev.initialCustomers": 0,
+    "rev.acquisitionCeiling": 45, "rev.customerCeiling": 900,
   },
   "unit-sales": {
     "rev.unitsMonth1": 200, "rev.monthlyGrowthRate": 4,
     "rev.pricePerUnit": 45, "rev.costPerUnit": 18,
+    "rev.capacityPerMonth": 900,
   },
   "hourly-services": {
     "rev.billableHeadcount": 3, "rev.hourlyRate": 125, "rev.utilisation": 65,
     "rev.hoursPerHeadPerMonth": 160, "rev.headcountGrowthPerMonth": 0.1,
+    "rev.capacityHeadcount": 9,
   },
   contract: {
     "rev.initialContracts": 0, "rev.newContractsPerMonth": 2,
@@ -53,10 +62,12 @@ const REVENUE_SEEDS: Record<RevenueStreamKind, IntakeDefaults> = {
   },
   marketplace: {
     "rev.gmvMonth1": 50000, "rev.monthlyGrowthRate": 8, "rev.takeRate": 12,
+    "rev.capacityPerMonth": 400000,
   },
   advertising: {
     "rev.impressionsMonth1": 500000, "rev.monthlyGrowthRate": 6,
     "rev.fillRate": 70, "rev.cpm": 8,
+    "rev.capacityPerMonth": 3000000,
   },
 };
 
@@ -77,6 +88,11 @@ export function defaultsForIndustry(industryKey: string): IntakeDefaults {
 
     "rev.kind": kind,
     ...REVENUE_SEEDS[kind],
+
+    "team.annualRaise": 3,
+    "team.staffScaleWithVolume": "no",
+    "team.volumePerStaffMember": 400,
+    "team.maxStaffCount": 12,
 
     "costs.cogsPercent": cogsPercent,
     "costs.rent": benchmark.occupancyRatio ? 4000 : 1500,
@@ -110,4 +126,18 @@ export function defaultsForIndustry(industryKey: string): IntakeDefaults {
 }
 
 /** Which keys the seed supplied, so untouched fields can be tagged correctly. */
-export const SEEDED_KEYS = Object.keys(defaultsForIndustry("other"));
+/**
+ * Every key this module can seed, across all seven revenue models.
+ *
+ * It used to be the keys of one industry's defaults — and `other` maps to a
+ * retail-footfall business, so six of the seven models had their drivers
+ * tagged with a different model's field names. The provenance counts printed
+ * in the finished plan were therefore wrong for anyone who was not running a
+ * shop, which is the opposite of what a provenance tag is for.
+ */
+export const SEEDED_KEYS = Array.from(
+  new Set([
+    ...Object.keys(defaultsForIndustry("other")),
+    ...Object.values(REVENUE_SEEDS).flatMap((seeds) => Object.keys(seeds)),
+  ]),
+);

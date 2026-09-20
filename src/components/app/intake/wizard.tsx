@@ -17,6 +17,41 @@ import { cn } from "@/lib/utils";
 
 const REVIEW_STEP = INTAKE_STEPS.length;
 
+/**
+ * Answers that are decisions rather than seeded numbers.
+ *
+ * These are never re-seeded when the industry changes. They carry no
+ * `provenance` flag, so they stay tagged `benchmark_default` forever and the
+ * re-seed loop would overwrite them every time — resetting the plan's
+ * audience, its start date and its whole revenue model as a side effect of
+ * correcting the industry on the first step.
+ */
+/**
+ * The seeds belonging to one revenue model.
+ *
+ * `defaultsForIndustry` returns the seeds for the industry's *default* model,
+ * so picking a different one has to take the fields that model actually asks
+ * for. Derived from the step definition rather than a second hardcoded list,
+ * which is what stops the two drifting.
+ */
+function REVENUE_SEEDS_BY_KIND(kind: string, seeds: IntakeState): IntakeState {
+  const revenueStep = INTAKE_STEPS.find((s) => s.key === "revenue");
+  if (!revenueStep) return {};
+  const wanted = revenueStep.fields({ "rev.kind": kind }).map((f) => f.key);
+  const out: IntakeState = {};
+  for (const key of wanted) if (seeds[key] !== undefined) out[key] = seeds[key];
+  return out;
+}
+
+const DECISIONS = new Set([
+  "company.purpose",
+  "company.startDate",
+  "company.firstTradingMonth",
+  "company.name",
+  "rev.kind",
+  "context.description",
+]);
+
 export function IntakeWizard({
   planId,
   planTitle,
@@ -32,6 +67,11 @@ export function IntakeWizard({
 }) {
   const router = useRouter();
   const [step, setStep] = useState(Math.min(initialStep, REVIEW_STEP));
+  /* The furthest step reached, which is what "how far through am I" means.
+     `step` alone is not: going back used to be persisted by the debounced save
+     1.2s later, writing the lower number and making the dashboard's progress
+     bar regress. */
+  const [furthest, setFurthest] = useState(Math.min(initialStep, REVIEW_STEP));
   const [state, setState] = useState<IntakeState>(() => ({
     ...defaultsForIndustry(String(initialState["company.industryKey"] ?? "other")),
     ...initialState,
@@ -104,15 +144,32 @@ export function IntakeWizard({
         : prev,
     );
 
-    // Changing industry re-seeds anything the user has not touched.
+    /* Changing industry re-seeds anything the user has not touched.
+
+       Two bugs lived here, and both only bite once people can move backwards —
+       which is the point of this change, so they had to go first.
+
+       The guard used to require `field.provenance`, and `company.purpose`,
+       `company.startDate`, `company.firstTradingMonth` and `rev.kind` do not
+       declare it. They were therefore tagged `benchmark_default` forever, so
+       returning to step one and changing industry silently reset the plan's
+       audience, its start date and its whole revenue model. Those four are
+       decisions, not seeded numbers, and are never re-seeded now.
+
+       And the loop read `provenance` from the closure rather than the state it
+       was updating, so it acted on a stale map. */
     if (field.key === "company.industryKey") {
       const seeds = defaultsForIndustry(String(value));
-      setState((prev) => {
-        const next = { ...prev };
-        for (const [key, seedValue] of Object.entries(seeds)) {
-          if (provenance[key] === "benchmark_default") next[key] = seedValue;
-        }
-        return { ...next, "company.industryKey": String(value) };
+      setProvenance((currentProvenance) => {
+        setState((prev) => {
+          const next = { ...prev };
+          for (const [key, seedValue] of Object.entries(seeds)) {
+            if (DECISIONS.has(key)) continue;
+            if (currentProvenance[key] === "benchmark_default") next[key] = seedValue;
+          }
+          return { ...next, "company.industryKey": String(value) };
+        });
+        return currentProvenance;
       });
     }
   };
@@ -142,24 +199,64 @@ export function IntakeWizard({
     return Object.keys(found).length === 0;
   };
 
+  /** Move to a step, remembering the furthest reached and saving as we go. */
+  const goTo = (next: number, { save = true }: { save?: boolean } = {}) => {
+    const target = Math.max(0, Math.min(next, REVIEW_STEP));
+    setStep(target);
+    const mark = Math.max(furthest, target);
+    setFurthest(mark);
+    if (save) void persist(mark);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   const goNext = () => {
     if (!validate()) {
       document.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
       return;
     }
-    const next = Math.min(step + 1, REVIEW_STEP);
-    setStep(next);
-    void persist(next);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    goTo(step + 1);
   };
 
-  const goBack = () => {
-    const previous = Math.max(0, step - 1);
-    setStep(previous);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  /* Backwards and sideways never validate.
+     
+     Somebody returning to fix one answer should not be held at the step they
+     are leaving — that is the trap that made this wizard feel one-way. The
+     whole plan is checked at Review instead, which is the only place it
+     matters, and `finish` cannot complete while anything is missing. */
+  const goBack = () => goTo(step - 1, { save: false });
+
+  const jumpTo = (target: number) => {
+    if (target > furthest) return;
+    setErrors({});
+    goTo(target, { save: false });
   };
+
+  const saveAndLeave = () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    startTransition(async () => {
+      await persist(Math.max(furthest, step));
+      router.push(`/plans/${planId}`);
+      router.refresh();
+    });
+  };
+
+  /** Everything still unanswered, across every step — the Review list. */
+  const outstanding = INTAKE_STEPS.flatMap((s, index) =>
+    s
+      .fields(state)
+      .filter((field) => {
+        if (!field.required) return false;
+        const raw = state[field.key];
+        return raw === undefined || raw === null || String(raw).trim() === "";
+      })
+      .map((field) => ({ step: index, stepTitle: s.title, label: field.label })),
+  );
 
   const finish = () => {
+    if (outstanding.length > 0) {
+      jumpTo(outstanding[0]!.step);
+      return;
+    }
     finishing.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     startTransition(async () => {
@@ -171,7 +268,7 @@ export function IntakeWizard({
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8 sm:px-10">
-      <ProgressRail step={step} />
+      <ProgressRail step={step} furthest={furthest} onJump={jumpTo} />
 
       {currentStep ? (
         <section aria-labelledby="step-title" className="mt-10">
@@ -183,18 +280,38 @@ export function IntakeWizard({
             <ModelPicker
               value={String(state["rev.kind"] ?? "")}
               onChange={(kind) => {
+                /* Switching model clears the old model's answers first.
+
+                   It used to seed only keys that were `undefined`, and leave
+                   everything else. Several drivers are shared by name across
+                   models — `rev.monthlyGrowthRate` belongs to four of them —
+                   so a rate entered for a shop silently became the rate for a
+                   marketplace, and was not re-seeded because it was no longer
+                   undefined. The stale keys also kept being saved, producing
+                   provenance entries pointing at paths the new stream does not
+                   have. */
                 const seeds = defaultsForIndustry(String(state["company.industryKey"] ?? "other"));
-                setState((prev) => ({ ...prev, "rev.kind": kind }));
-                // Seed the new model's drivers, which differ entirely.
+                const seededForKind = REVENUE_SEEDS_BY_KIND(kind, seeds);
+
                 setState((prev) => {
-                  const next = { ...prev };
-                  for (const [key, value] of Object.entries(seeds)) {
-                    if (key.startsWith("rev.") && key !== "rev.kind" && next[key] === undefined) {
-                      next[key] = value;
-                    }
+                  const next: IntakeState = {};
+                  for (const [key, value] of Object.entries(prev)) {
+                    if (!key.startsWith("rev.")) next[key] = value;
                   }
+                  return { ...next, ...seededForKind, "rev.kind": kind };
+                });
+
+                // Provenance follows: the old model's tags describe fields that
+                // no longer exist, and the new model's are ours until touched.
+                setProvenance((prev) => {
+                  const next: ProvenanceState = {};
+                  for (const [key, value] of Object.entries(prev)) {
+                    if (!key.startsWith("rev.")) next[key] = value;
+                  }
+                  for (const key of Object.keys(seededForKind)) next[key] = "benchmark_default";
                   return next;
                 });
+                setErrors({});
               }}
             />
           ) : (
@@ -214,17 +331,59 @@ export function IntakeWizard({
           )}
         </section>
       ) : (
-        <ReviewStep planTitle={planTitle} state={state} provenance={provenance} />
+        <>
+          {/* What is still missing, across every step, with a way straight to
+              it. Validation used to run only on Continue, so a plan could
+              reach this screen with blanks behind it and the server would
+              quietly decline to mark it complete while the browser navigated
+              away as though it had worked. */}
+          {outstanding.length > 0 ? (
+            <section
+              aria-labelledby="outstanding"
+              className="mt-10 rounded-lg border border-strong bg-surface-raised p-6"
+            >
+              <h2 id="outstanding" className="font-display text-lg">
+                {outstanding.length === 1
+                  ? "One answer is still missing"
+                  : `${outstanding.length} answers are still missing`}
+              </h2>
+              <p className="mt-1.5 text-sm leading-relaxed text-secondary">
+                The model cannot be built without these. Everything else is saved.
+              </p>
+              <ul className="mt-4 divide-y divide-hairline border-y border-hairline">
+                {outstanding.map((item) => (
+                  <li key={`${item.step}-${item.label}`}>
+                    <button
+                      type="button"
+                      onClick={() => jumpTo(item.step)}
+                      className="flex w-full items-center justify-between gap-4 py-3 text-left text-sm hover:bg-surface-sunken"
+                    >
+                      <span className="text-primary">{item.label}</span>
+                      <span className="shrink-0 text-xs text-tertiary">{item.stepTitle} →</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          <ReviewStep planTitle={planTitle} state={state} provenance={provenance} />
+        </>
       )}
 
       <div className="mt-12 flex items-center justify-between gap-4 border-t border-hairline pt-6">
-        <div>
+        <div className="flex items-center gap-3">
           {step > 0 ? (
             <Button type="button" variant="secondary" onClick={goBack}>
               <ArrowLeft aria-hidden className="size-4" />
               Back
             </Button>
           ) : null}
+          {/* There was no way out of this wizard at all. Leaving by the sidebar
+              kept the answers but left the plan unfinished, and every page
+              downstream then refuses to render. */}
+          <Button type="button" variant="ghost" onClick={saveAndLeave} disabled={isPending}>
+            Save and finish later
+          </Button>
         </div>
 
         <div className="flex items-center gap-4">
@@ -248,27 +407,64 @@ export function IntakeWizard({
   );
 }
 
-function ProgressRail({ step }: { step: number }) {
+/**
+ * The rail, which is now navigation rather than decoration.
+ *
+ * It used to render an `<li>` holding a screen-reader label and an
+ * `aria-hidden` coloured bar — no button, no handler, nothing to click. Any
+ * step already reached can be opened directly, which is what somebody fixing
+ * one answer on a finished plan actually needs.
+ */
+function ProgressRail({
+  step,
+  furthest,
+  onJump,
+}: {
+  step: number;
+  furthest: number;
+  onJump: (index: number) => void;
+}) {
   const labels = [...INTAKE_STEPS.map((s) => s.title), "Review"];
   return (
     <ol className="flex flex-wrap gap-x-1 gap-y-2" aria-label="Intake progress">
-      {labels.map((label, index) => (
-        <li key={label} className="flex-1 basis-16">
-          <span className="sr-only">
-            {label}
-            {index === step ? " (current step)" : index < step ? " (completed)" : ""}
-          </span>
-          <span
-            aria-hidden
-            className={cn(
-              "block h-1 rounded-full transition-colors",
-              index < step && "bg-emerald-700",
-              index === step && "bg-brass-500",
-              index > step && "bg-surface-sunken",
-            )}
-          />
-        </li>
-      ))}
+      {labels.map((label, index) => {
+        const reachable = index <= furthest;
+        return (
+          <li key={label} className="flex-1 basis-16">
+            <button
+              type="button"
+              disabled={!reachable}
+              onClick={() => onJump(index)}
+              aria-current={index === step ? "step" : undefined}
+              className={cn(
+                "group block w-full rounded-sm py-1 text-left",
+                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700",
+                reachable ? "cursor-pointer" : "cursor-default",
+              )}
+            >
+              <span className="sr-only">
+                {label}
+                {index === step
+                  ? " (current step)"
+                  : reachable
+                    ? " — go to this step"
+                    : " (not reached yet)"}
+              </span>
+              <span
+                aria-hidden
+                className={cn(
+                  "block h-1 rounded-full transition-colors",
+                  index < step && "bg-emerald-700",
+                  index === step && "bg-brass-500",
+                  index > step && index <= furthest && "bg-emerald-700/35",
+                  index > furthest && "bg-surface-sunken",
+                  reachable && index !== step && "group-hover:bg-emerald-700/70",
+                )}
+              />
+            </button>
+          </li>
+        );
+      })}
     </ol>
   );
 }
