@@ -251,6 +251,12 @@ selects better-sqlite3. Production must be Postgres, and
 `assertProductionEnv()` refuses to boot on a SQLite URL — a container filesystem
 is discarded on every deploy, so the alternative is silently losing every plan.
 
+The image's build stage regenerates the client for Postgres, so it also sets a
+placeholder `DATABASE_URL` of the matching shape. Without one the default SQLite
+URL picks the SQLite adapter against a Postgres client, and Prisma rejects the
+pair while Next is collecting page data — so the error names `/api/health`
+rather than the mismatch, which sends you looking in the wrong place.
+
 **Migrations, not `db push`.** `prisma migrate deploy` runs in the container's
 entrypoint before it binds a port, so a failed migration stops the task rather
 than serving traffic against a schema it does not match.
@@ -262,9 +268,15 @@ The infrastructure is CDK in `infra/`: ECS Fargate behind an ALB behind
 CloudFront, RDS Postgres Multi-AZ, the certificate in its own us-east-1 stack
 because CloudFront accepts no other region. `DEPLOY.md` is the runbook.
 
-The workflow files live in `infra/workflows/` rather than `.github/workflows/`
-because the token that wrote them lacked GitHub's `workflow` scope; DEPLOY.md
-has the one command that moves them into place.
+The workflow files live in `infra/workflows/`, not `.github/workflows/`, and not
+by choice: GitHub refuses any push that writes under `.github/workflows/` from a
+credential without the `workflow` scope, and the tokens available to this session
+— both git and the API — lack it. **Nothing runs on a push until somebody with
+that scope moves them**, which is one command in DEPLOY.md. `ci.yml` verifies
+every pull request and non-main branch, including a container build, because the
+image is the artefact that ships. `deploy.yml` runs on push to `main` and stops
+on its first step, naming the missing `AWS_DEPLOY_ROLE_ARN`, until step 7 of
+DEPLOY.md has been done.
 
 ## Known gaps
 

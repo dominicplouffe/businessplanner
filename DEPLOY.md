@@ -193,20 +193,38 @@ CDK bootstrap roles (`cdk-*-deploy-role-*`, `cdk-*-file-publishing-role-*`).
 Then add the role ARN as the `AWS_DEPLOY_ROLE_ARN` repository secret, and create
 a `production` environment in GitHub if you want a manual approval gate.
 
-### Move the workflows into place
+### Move the workflows into place — you have to do this one
 
-The workflow files are in `infra/workflows/` rather than `.github/workflows/`,
-because the token that wrote them lacked GitHub's `workflow` scope and GitHub
-rejects such a push outright. One command fixes it:
+The workflow files are in `infra/workflows/`, and they cannot be moved from this
+session. GitHub refuses a push that creates or updates anything under
+`.github/workflows/` unless the credential carries the `workflow` scope, and
+neither route available here has it: the git push is rejected with *refusing to
+allow an OAuth App to create or update workflow*, and the GitHub API returns
+*Insufficient scope: required "workflow"*. Your own credential almost certainly
+has it. One command, from a clone:
 
 ```bash
+git pull
 mkdir -p .github/workflows
-cp infra/workflows/ci.yml infra/workflows/deploy.yml .github/workflows/
-git add .github/workflows && git commit -m "Add CI and deploy workflows" && git push
+git mv infra/workflows/ci.yml infra/workflows/deploy.yml .github/workflows/
+git rm infra/workflows/README.md
+git commit -m "Move the CI and deploy workflows into place" && git push
 ```
 
-After that, every push to `main` deploys: verify → build → push → `cdk deploy` →
-wait for the service → invalidate the edge → check `/api/health`.
+Then change the one scan root in `tests/site.test.ts` from `infra/workflows` to
+`.github/workflows`, or its domain-spelling check stops covering them. The
+alternative, if you would rather not touch the credential, is to paste both
+files into GitHub's web editor — the browser is always allowed to write
+workflows.
+
+Until they are in `.github/workflows/`, nothing runs on a push. That is the only
+thing standing between this repository and working CI.
+
+Once that secret exists, every push to `main` deploys: verify → build → push →
+`cdk deploy` → wait for the service → invalidate the edge → check
+`/api/health`. Until it exists the deploy job stops on its first step and says
+so; it builds nothing and touches nothing in AWS. A red Deploy run on `main`
+before this step is done means exactly that and nothing worse.
 
 ---
 
@@ -229,6 +247,12 @@ stage compiles better-sqlite3 from source — the 12.x that
 the deps stage installs `python3 make g++`. If you see
 `gyp ERR! find Python` in a build, that install line has gone missing; nothing
 else in the image needs a compiler, and the runtime stage deliberately has none.
+
+The build stage also sets a placeholder `DATABASE_URL`. It has to: the stage
+regenerates the Prisma client for Postgres, and `src/lib/db.ts` chooses its
+adapter from that variable, so an unset one selects the SQLite adapter and every
+route importing the client fails page-data collection with
+`not compatible with the provider`. The placeholder is never connected to.
 
 ---
 

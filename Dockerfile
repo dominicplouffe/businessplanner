@@ -55,6 +55,14 @@ COPY . .
 # into this image must speak Postgres, so the provider is switched here and the
 # change never leaves the image.
 RUN node scripts/set-db-provider.mjs postgresql && pnpm exec prisma generate
+# A Postgres URL, because the line above made the generated client a Postgres
+# one and `src/lib/db.ts` picks its adapter from this variable. Leave it unset
+# and the default SQLite URL selects the SQLite adapter, which Prisma rejects
+# against a Postgres client — and it rejects it while Next is collecting page
+# data, so the error names a route rather than the mismatch. Nothing connects
+# during a build: this is a shape, not a database. The real URL arrives at run
+# time from the task definition.
+ENV DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build
 ENV NEXT_TELEMETRY_DISABLED=1
 # Public values are inlined at build time by Next, so the origin has to be
 # known here rather than at run time.

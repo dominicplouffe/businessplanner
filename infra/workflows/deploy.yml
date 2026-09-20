@@ -48,6 +48,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Until the OIDC role exists this job cannot do anything, and the
+      # credential action's own failure does not say which secret is missing.
+      # Step 7 of DEPLOY.md is how the role is created.
+      - name: Check the deploy role is configured
+        env:
+          ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -z "${ROLE_ARN}" ]; then
+            echo "::error::AWS_DEPLOY_ROLE_ARN is not set, so there is nothing to deploy into. See step 7 of DEPLOY.md. No image was built and nothing was changed in AWS."
+            exit 1
+          fi
+
       - name: Assume the deploy role
         uses: aws-actions/configure-aws-credentials@v4
         with:
