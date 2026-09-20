@@ -144,7 +144,11 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
         {
           id: "service", name: "Service window", kind: "retail-footfall", startMonth: 2,
           dailyTraffic: 120, conversionRate: 1, averageTicket: 14,
-          openDaysPerMonth: 24, monthlyGrowthRate: 0.01, cogsPercent: 0.32,
+          openDaysPerMonth: 24,
+          // 120 covers a day now; 168 is the most the window can serve in a
+          // lunch rush, and no growth rate can take a truck past its hatch.
+          growth: { shape: "saturating", monthlyRate: 0.01, ceiling: 4_032, terminalAnnualRate: 0.02 },
+          cogsPercent: 0.32,
           seasonality: [0.7, 0.72, 0.9, 1.05, 1.15, 1.25, 1.3, 1.25, 1.1, 0.95, 0.8, 0.73],
         },
       ],
@@ -219,7 +223,11 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
         {
           id: "counter", name: "Counter sales", kind: "retail-footfall", startMonth: 3,
           dailyTraffic: 240, conversionRate: 1, averageTicket: 9.5,
-          openDaysPerMonth: 28, monthlyGrowthRate: 0.008, cogsPercent: 0.24,
+          openDaysPerMonth: 28,
+          // 240 cups a day against 336 at full throughput on one machine and
+          // one barista — past that the queue is the constraint, not demand.
+          growth: { shape: "saturating", monthlyRate: 0.008, ceiling: 9_408, terminalAnnualRate: 0.02 },
+          cogsPercent: 0.24,
         },
       ],
       roles: [
@@ -293,7 +301,11 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
         {
           id: "covers", name: "Dining room", kind: "retail-footfall", startMonth: 4,
           dailyTraffic: 210, conversionRate: 0.62, averageTicket: 38,
-          openDaysPerMonth: 26, monthlyGrowthRate: 0.012, cogsPercent: 0.31,
+          openDaysPerMonth: 26,
+          // 130 covers a day in a 40-seat room is about 1.6 turns a service.
+          // 182 is 2.2 turns, which is a full house — the room cannot do more.
+          growth: { shape: "saturating", monthlyRate: 0.012, ceiling: 4_739, terminalAnnualRate: 0.02 },
+          cogsPercent: 0.31,
           seasonality: [0.88, 0.9, 0.97, 1.02, 1.06, 1.08, 1.05, 1.03, 1.0, 1.01, 0.99, 1.01],
         },
       ],
@@ -376,7 +388,11 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
         {
           id: "retail", name: "Retail counter", kind: "retail-footfall", startMonth: 3,
           dailyTraffic: 150, conversionRate: 1, averageTicket: 13,
-          openDaysPerMonth: 26, monthlyGrowthRate: 0.01, cogsPercent: 0.28,
+          openDaysPerMonth: 26,
+          // The counter sells what the ovens bake. 210 transactions a day is
+          // the morning bake plus an afternoon run, and there is no third.
+          growth: { shape: "saturating", monthlyRate: 0.01, ceiling: 5_460, terminalAnnualRate: 0.02 },
+          cogsPercent: 0.28,
           seasonality: [0.92, 0.95, 1.0, 1.0, 1.02, 0.98, 0.94, 0.94, 1.0, 1.04, 1.1, 1.15],
         },
         {
@@ -459,7 +475,11 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
         {
           id: "bar", name: "Bar service", kind: "retail-footfall", startMonth: 5,
           dailyTraffic: 160, conversionRate: 0.9, averageTicket: 26,
-          openDaysPerMonth: 24, monthlyGrowthRate: 0.011, cogsPercent: 0.26,
+          openDaysPerMonth: 24,
+          // 144 served a night against 202 at capacity — the licence, the
+          // room and the number of people one bar can pour for.
+          growth: { shape: "saturating", monthlyRate: 0.011, ceiling: 4_838, terminalAnnualRate: 0.02 },
+          cogsPercent: 0.26,
           seasonality: [0.85, 0.88, 0.96, 1.0, 1.08, 1.12, 1.12, 1.08, 1.02, 1.0, 0.95, 1.14],
         },
       ],
@@ -622,7 +642,10 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
           // quotes gross margin after driver pay, fuel and maintenance, so
           // holding maintenance as a flat monthly overhead reported a margin
           // eight points above the band for no real reason.
-          unitsMonth1: 17_000, monthlyGrowthRate: 0.008,
+          unitsMonth1: 17_000,
+          // Miles are trucks multiplied by hours a driver may legally work.
+          // 23,800 a month is the fleet running hard, not a bigger fleet.
+          growth: { shape: "saturating", monthlyRate: 0.008, ceiling: 23_800, terminalAnnualRate: 0.02 },
           pricePerUnit: 2.55, costPerUnit: 0.86, cogsPercent: 0,
         },
       ],
@@ -702,7 +725,10 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
           // matched by the stylist cohort below — a salon billing seven chairs
           // and paying five is the contradiction the review is built to catch.
           billableHeadcount: 5, hoursPerHeadPerMonth: 150, utilisation: 0.72,
-          hourlyRate: 85, headcountGrowthPerMonth: 0.02, cogsPercent: 0.08,
+          hourlyRate: 85,
+          // Five chairs today, six at most: the room has no seventh station.
+          growth: { shape: "linear", perMonth: 0.02, max: 6.2 },
+          cogsPercent: 0.08,
         },
       ],
       roles: [
@@ -945,7 +971,13 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
       revenueStreams: [
         {
           id: "places", name: "Enrolment", kind: "subscription", startMonth: 3,
-          initialCustomers: 14, newCustomersMonth1: 5, newCustomerGrowthRate: -0.02,
+          initialCustomers: 14, newCustomersMonth1: 5,
+          growth: { shape: "saturating", monthlyRate: -0.02, ceiling: 5, terminalAnnualRate: 0 },
+          // The licence is the ceiling and it is not negotiable. This example
+          // used to enrol 79 children by month 36 against a cap the page's own
+          // copy calls hard — the reported defect again, in our own childcare
+          // sample. 80 is the permitted roll; the model now fills toward it.
+          customerCeiling: 80,
           monthlyChurnRate: 0.03, pricePerCustomerPerMonth: 1_350,
           expansionRate: 0, prepaidMonths: 1, cogsPercent: 0.07,
         },
@@ -1022,7 +1054,10 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
       revenueStreams: [
         {
           id: "turns", name: "Machine turns", kind: "unit-sales", startMonth: 2,
-          unitsMonth1: 6_800, monthlyGrowthRate: 0.009,
+          unitsMonth1: 6_800,
+          // Machines x cycles x opening hours. A laundromat's ceiling is the
+          // hardest in this file: you cannot wash more than the drums hold.
+          growth: { shape: "saturating", monthlyRate: 0.009, ceiling: 9_180, terminalAnnualRate: 0.02 },
           pricePerUnit: 4.75, costPerUnit: 0, cogsPercent: 0.24,
         },
       ],
@@ -1095,7 +1130,10 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
       revenueStreams: [
         {
           id: "nights", name: "Nightly stays", kind: "unit-sales", startMonth: 2,
-          unitsMonth1: 62, monthlyGrowthRate: 0.004,
+          unitsMonth1: 62,
+          // Nights are the hardest ceiling of all: three units cannot let more
+          // than ninety nights a month, and nobody achieves full occupancy.
+          growth: { shape: "saturating", monthlyRate: 0.004, ceiling: 78, terminalAnnualRate: 0.02 },
           pricePerUnit: 245, costPerUnit: 44, cogsPercent: 0,
           seasonality: [0.7, 0.75, 0.9, 1.0, 1.15, 1.35, 1.4, 1.35, 1.1, 0.95, 0.8, 0.95],
         },
@@ -1168,14 +1206,28 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
       revenueStreams: [
         {
           id: "orders", name: "Online orders", kind: "unit-sales", startMonth: 1,
-          unitsMonth1: 420, monthlyGrowthRate: 0.07,
+          unitsMonth1: 420,
+          // This example used to run 7% a month with nothing stopping it,
+          // reaching $14M of year-five revenue on three people who never got
+          // hired — the reported defect, on our own marketing site. 3,000
+          // orders a month is what the warehouse and the acquisition channel
+          // can carry before the plan needs a different business in it.
+          growth: { shape: "saturating", monthlyRate: 0.07, ceiling: 3_000, terminalAnnualRate: 0.03 },
           pricePerUnit: 68, costPerUnit: 26, cogsPercent: 0,
           seasonality: [0.85, 0.8, 0.9, 0.95, 1.0, 0.95, 0.9, 0.95, 1.05, 1.15, 1.45, 1.35],
         },
       ],
       roles: [
         { id: "own", title: "Founder", annualSalary: 84_000, isOwner: true, startMonth: 1 },
-        { id: "ops", title: "Operations", annualSalary: 58_000, count: 2, startMonth: 3 },
+        {
+          id: "ops", title: "Operations", annualSalary: 58_000, count: 2, startMonth: 3,
+          // Somebody picks, packs and answers for every order. Holding this at
+          // two people while orders grew six-fold was how the old version of
+          // this example reached $4.7M of revenue per head.
+          staffing: {
+            driver: "stream-volume", streamId: "orders", perHead: 900, minCount: 2, maxCount: 6,
+          },
+        },
       ],
       opex: [
         { id: "ads", name: "Paid acquisition", category: "marketing", percentOfRevenue: 0.22 },
@@ -1248,7 +1300,12 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
           // is the classic services-plan contradiction: revenue from twenty-three
           // consultants, salaries for three.
           billableHeadcount: 3, hoursPerHeadPerMonth: 160, utilisation: 0.68,
-          hourlyRate: 185, headcountGrowthPerMonth: 0.072, cogsPercent: 0,
+          hourlyRate: 185,
+          // Eight consultants is the most this partnership intends to carry;
+          // the cohort below is staffed from this line, so the plan cannot
+          // bill for a consultant it does not pay.
+          growth: { shape: "linear", perMonth: 0.072, max: 8 },
+          cogsPercent: 0,
         },
       ],
       roles: [

@@ -88,6 +88,12 @@ export function projectStream(
     if (m < stream.startMonth) continue;
     const elapsed = m - stream.startMonth; // 0 in the first active month
     const season = seasonalFactor(stream, m, startCalendarMonth);
+    /* What is consuming capacity this month, in the ceiling's own unit.
+       Set per kind because the units differ: hourly services sell *hours* but
+       are limited by *people*, and a seasonal business's December is a swing
+       around its sustained capacity rather than a new capacity. Measuring the
+       seasonal peak against the ceiling reported a salon at 10,730% full. */
+    let capacityUsed = 0;
 
     switch (stream.kind) {
       case "subscription": {
@@ -97,12 +103,21 @@ export function projectStream(
         // Churn applies to the base before additions; additions bill in full.
         const churned = customers * stream.monthlyChurnRate;
         customers = customers - churned + additions;
+        // A licensed or seated business fills and then holds: you enrol until
+        // the licence is reached and the rest of the demand is a waiting list.
+        // Deliberately a clip rather than a Verhulst taper — a nursery at 90%
+        // of its licence is not enrolling more slowly, it is nearly full, and
+        // the corner where it stops is a real feature of the business.
+        if (stream.customerCeiling !== undefined) {
+          customers = Math.min(customers, stream.customerCeiling);
+        }
         expansionMultiplier =
           elapsed === 0 ? 1 : expansionMultiplier * (1 + stream.expansionRate);
         const gross =
           customers * stream.pricePerCustomerPerMonth * expansionMultiplier * season;
         revenue[i] = gross;
         volume[i] = customers;
+        capacityUsed = customers;
         // Prepaid terms bill n months up front; the unearned portion is a liability.
         if (stream.prepaidMonths > 1) {
           deferred[i] = gross * (stream.prepaidMonths - 1);
@@ -112,7 +127,9 @@ export function projectStream(
 
       case "unit-sales": {
         volumeLabel = "Units";
-        const units = projectCurve(curve, stream.unitsMonth1, elapsed) * season;
+        const trend = projectCurve(curve, stream.unitsMonth1, elapsed);
+        capacityUsed = trend;
+        const units = trend * season;
         revenue[i] = units * stream.pricePerUnit;
         cogs[i] = units * stream.costPerUnit;
         volume[i] = units;
@@ -123,6 +140,8 @@ export function projectStream(
         volumeLabel = "Billable hours";
         billableHeads = projectCurve(curve, stream.billableHeadcount, elapsed);
         heads[i] = billableHeads;
+        // People, not hours: the cap on this stream is how many are employed.
+        capacityUsed = billableHeads;
         const hours = billableHeads * stream.hoursPerHeadPerMonth * stream.utilisation * season;
         revenue[i] = hours * stream.hourlyRate;
         volume[i] = hours;
@@ -135,7 +154,9 @@ export function projectStream(
         // stated in covers or tickets a month — the seats-times-turns number an
         // owner already knows — rather than in a rate nobody can picture.
         const perMonth = stream.dailyTraffic * stream.conversionRate * stream.openDaysPerMonth;
-        const transactions = projectCurve(curve, perMonth, elapsed) * season;
+        const trend = projectCurve(curve, perMonth, elapsed);
+        capacityUsed = trend;
+        const transactions = trend * season;
         revenue[i] = transactions * stream.averageTicket;
         volume[i] = transactions;
         break;
@@ -143,7 +164,9 @@ export function projectStream(
 
       case "marketplace": {
         volumeLabel = "GMV";
-        const gmv = projectCurve(curve, stream.gmvMonth1, elapsed) * season;
+        const gmvTrend = projectCurve(curve, stream.gmvMonth1, elapsed);
+        capacityUsed = gmvTrend;
+        const gmv = gmvTrend * season;
         revenue[i] = gmv * stream.takeRate;
         volume[i] = gmv;
         break;
@@ -166,12 +189,15 @@ export function projectStream(
         const count = activeContracts.reduce((sum, c) => sum + c.count, 0);
         revenue[i] = count * stream.monthlyValuePerContract * season;
         volume[i] = count;
+        capacityUsed = count;
         break;
       }
 
       case "advertising": {
         volumeLabel = "Impressions";
-        const impressions = projectCurve(curve, stream.impressionsMonth1, elapsed) * season;
+        const impressionTrend = projectCurve(curve, stream.impressionsMonth1, elapsed);
+        capacityUsed = impressionTrend;
+        const impressions = impressionTrend * season;
         const sold = impressions * stream.fillRate;
         revenue[i] = (sold / 1000) * stream.cpm;
         volume[i] = sold;
@@ -182,9 +208,13 @@ export function projectStream(
     // What capacity this month was, and how much of it is being used. Written
     // once here rather than in seven branches, because every kind measures it
     // against the same `volume` line.
-    const capacity = ceilingAt(curve, elapsed);
+    // A subscription's capacity is its customer ceiling, which bounds the
+    // stock the volume line reports; every other kind measures against the
+    // curve's own ceiling on the flow.
+    const capacity =
+      stream.kind === "subscription" ? (stream.customerCeiling ?? null) : ceilingAt(curve, elapsed);
     ceiling[i] = capacity;
-    saturation[i] = capacity !== null && capacity > 0 ? (volume[i] ?? 0) / capacity : null;
+    saturation[i] = capacity !== null && capacity > 0 ? capacityUsed / capacity : null;
 
     // A percentage COGS applies to any stream that has no explicit unit cost.
     if (cogs[i] === 0 && stream.cogsPercent > 0) {

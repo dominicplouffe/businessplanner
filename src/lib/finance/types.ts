@@ -82,6 +82,16 @@ export const RevenueStreamSchema = z.discriminatedUnion("kind", [
     newCustomersMonth1: z.number().min(0),
     newCustomerGrowthRate: legacyMonthlyRate,
     monthlyChurnRate: z.number().min(0).max(1),
+    /**
+     * The most customers this business could serve at once.
+     *
+     * The curve above bounds *acquisition*; this bounds the *stock*, which is
+     * what a subscription author actually thinks in — licensed places at a
+     * nursery, chairs in a room, seats a support team can carry. Additions are
+     * damped as the base approaches it rather than clipped, so the ceiling
+     * bends the curve instead of putting a corner in it.
+     */
+    customerCeiling: z.number().positive().optional(),
     pricePerCustomerPerMonth: z.number().min(0),
     /** Net revenue expansion on the retained base, per month. */
     expansionRate: z.number().min(0).default(0),
