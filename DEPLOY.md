@@ -56,11 +56,33 @@ project's rules forbid.
 
 Once per account and region. Uses your admin credentials.
 
+**Set the account first.** `cdk bootstrap` synthesises the app before it
+bootstraps anything, and both stacks resolve a Route 53 hosted zone, which
+needs a concrete account and region. This used to be step 3, after the command
+that needs it — which meant following these instructions exactly produced an
+error on the very first command.
+
 ```bash
 cd infra
 npm ci
+
+aws sts get-caller-identity          # must print your account before anything else
+
+export AWS_REGION=us-east-1
+export CDK_DEFAULT_ACCOUNT=<ACCOUNT_ID>
+
 npx cdk bootstrap aws://<ACCOUNT_ID>/us-east-1
 ```
+
+If `get-caller-identity` fails, nothing below will work — configure credentials
+first. If the account is not set, the app stops with a message saying so rather
+than a page of CDK internals.
+
+**Skipping the lookup.** Every command here accepts
+`--context hostedZoneId=<ZONE_ID>`, which names the zone instead of looking it
+up. Worth using: a lookup against a zone that does not exist yet does not fail,
+it returns a placeholder and lets the deploy run until certificate validation
+hangs with nothing to explain it. `aws route53 list-hosted-zones` has the id.
 
 ## 3. Create the infrastructure
 
@@ -69,9 +91,6 @@ validates against Route 53 automatically because the stack owns the DNS records.
 
 ```bash
 cd infra
-export AWS_REGION=us-east-1
-export CDK_DEFAULT_ACCOUNT=<ACCOUNT_ID>
-
 npx cdk deploy VenturellyCertificate VenturellySite \
   --context domainName=getventurely.com \
   --context imageTag=bootstrap

@@ -48,6 +48,9 @@ import { Construct } from "constructs";
 export type SiteStackProps = StackProps & {
   /** Apex domain. The hosted zone must already exist in this account. */
   domainName: string;
+  /** The zone's id, when it is known. Given one, the stack skips the Route 53
+   *  lookup — which is what lets it synthesise without AWS credentials. */
+  hostedZoneId?: string;
   /** Tag of the image in ECR to run. The CI workflow passes the commit SHA. */
   imageTag: string;
   /** Smaller and cheaper for a staging stack. */
@@ -219,7 +222,15 @@ export class SiteStack extends Stack {
       idleTimeout: Duration.seconds(120),
     });
 
-    const zone = route53.HostedZone.fromLookup(this, "Zone", { domainName });
+    const zone = props.hostedZoneId
+      ? route53.HostedZone.fromHostedZoneAttributes(this, "Zone", {
+          hostedZoneId: props.hostedZoneId,
+          zoneName: domainName,
+        })
+      // A lookup needs credentials and a zone that already exists; when the
+      // zone is missing it returns a dummy and the deploy fails much later,
+      // during certificate validation. Pass --context hostedZoneId= to skip it.
+      : route53.HostedZone.fromLookup(this, "Zone", { domainName });
 
     // Regional certificate for the ALB. CloudFront needs its own, in us-east-1,
     // which is the one below.
