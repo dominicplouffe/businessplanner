@@ -268,15 +268,18 @@ The infrastructure is CDK in `infra/`: ECS Fargate behind an ALB behind
 CloudFront, RDS Postgres Multi-AZ, the certificate in its own us-east-1 stack
 because CloudFront accepts no other region. `DEPLOY.md` is the runbook.
 
-The workflow files live in `infra/workflows/`, not `.github/workflows/`, and not
-by choice: GitHub refuses any push that writes under `.github/workflows/` from a
-credential without the `workflow` scope, and the tokens available to this session
-— both git and the API — lack it. **Nothing runs on a push until somebody with
-that scope moves them**, which is one command in DEPLOY.md. `ci.yml` verifies
-every pull request and non-main branch, including a container build, because the
-image is the artefact that ships. `deploy.yml` runs on push to `main` and stops
-on its first step, naming the missing `AWS_DEPLOY_ROLE_ARN`, until step 7 of
-DEPLOY.md has been done.
+`.github/workflows/ci.yml` verifies every pull request and non-main branch,
+including a container build, because the image is the artefact that ships — a
+broken Dockerfile should fail on a branch rather than during a deploy.
+`deploy.yml` runs on push to `main` and stops on its first step, naming the
+missing `AWS_DEPLOY_ROLE_ARN`, until step 7 of DEPLOY.md has been done.
+
+**You cannot edit either file from an agent session.** GitHub refuses a push that
+writes under `.github/workflows/` unless the credential carries the `workflow`
+scope, and neither the git credential nor the REST API available here has it.
+Both routes fail late, after the commit looks fine locally. A change to a workflow
+has to be made from a clone; there is no workaround worth building, and parking
+the files elsewhere so a push succeeds means the repository has no CI.
 
 ## Known gaps
 

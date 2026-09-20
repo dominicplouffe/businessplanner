@@ -47,7 +47,7 @@ rg -n "getventur[a-z]*\.com|getventur[a-z]*" --glob '!node_modules' --glob '!cdk
 ```
 
 The places that carry a default are `src/lib/env.ts`, `Dockerfile`,
-`infra/bin/infra.ts`, `infra/workflows/{ci,deploy}.yml` and `public/llms.txt`.
+`infra/bin/infra.ts`, `.github/workflows/{ci,deploy}.yml` and `public/llms.txt`.
 A staging deployment overrides all of it with `NEXT_PUBLIC_SITE_URL` and
 `--context domainName=`, so nothing here is a hardcode in the sense the
 project's rules forbid.
@@ -193,32 +193,15 @@ CDK bootstrap roles (`cdk-*-deploy-role-*`, `cdk-*-file-publishing-role-*`).
 Then add the role ARN as the `AWS_DEPLOY_ROLE_ARN` repository secret, and create
 a `production` environment in GitHub if you want a manual approval gate.
 
-### Move the workflows into place — you have to do this one
+### The workflows
 
-The workflow files are in `infra/workflows/`, and they cannot be moved from this
-session. GitHub refuses a push that creates or updates anything under
-`.github/workflows/` unless the credential carries the `workflow` scope, and
-neither route available here has it: the git push is rejected with *refusing to
-allow an OAuth App to create or update workflow*, and the GitHub API returns
-*Insufficient scope: required "workflow"*. Your own credential almost certainly
-has it. One command, from a clone:
+Both live in `.github/workflows/` and run as committed. Nothing to do here.
 
-```bash
-git pull
-mkdir -p .github/workflows
-git mv infra/workflows/ci.yml infra/workflows/deploy.yml .github/workflows/
-git rm infra/workflows/README.md
-git commit -m "Move the CI and deploy workflows into place" && git push
-```
-
-Then change the one scan root in `tests/site.test.ts` from `infra/workflows` to
-`.github/workflows`, or its domain-spelling check stops covering them. The
-alternative, if you would rather not touch the credential, is to paste both
-files into GitHub's web editor — the browser is always allowed to write
-workflows.
-
-Until they are in `.github/workflows/`, nothing runs on a push. That is the only
-thing standing between this repository and working CI.
+They could not be put there from an agent session — GitHub refuses a push that
+writes under `.github/workflows/` unless the credential carries the `workflow`
+scope, and neither the git credential nor the REST API has it. If a future
+session needs to change one, that is why it will be refused, and the fix is to
+make the edit from a clone rather than to work around it.
 
 Once that secret exists, every push to `main` deploys: verify → build → push →
 `cdk deploy` → wait for the service → invalidate the edge → check

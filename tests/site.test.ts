@@ -255,7 +255,7 @@ describe("sample plans", () => {
    and a review comment is not what stops that recurring.
    ========================================================================== */
 describe("the domain", () => {
-  const ROOTS = ["src", "public", "infra/bin", "infra/lib", "infra/workflows"];
+  const ROOTS = ["src", "public", "infra/bin", "infra/lib", ".github/workflows"];
   const FILES = ["README.md", "DEPLOY.md", "CLAUDE.md", "Dockerfile", ".env.example"];
   const WRONG = /getventur(?!ely\b)[a-z]*\.com/gi;
 
