@@ -39,6 +39,18 @@ export class FixtureGenerator implements Generator {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * The same composition, synchronously.
+ *
+ * The streaming interface exists for the editor, where prose arriving a clause
+ * at a time is the point. Anything that just wants the finished text — the
+ * sample plans rendered at build time, a test — takes this instead of draining
+ * an async iterator thirteen times per document.
+ */
+export function composeSection(ctx: GenerationContext): string {
+  return compose(ctx);
+}
+
 function compose(ctx: GenerationContext): string {
   const { model, metrics, assumptions } = ctx;
   const currency = assumptions.company.currency;

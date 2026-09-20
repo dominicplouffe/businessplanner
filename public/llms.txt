@@ -43,6 +43,14 @@
 - Immigration business plans (E-2, L-1A, EB-5) — document preparation only, not
   legal advice; review by licensed counsel is recommended before filing.
 
+## Sample plans
+
+Four complete plans are published at /examples, built during the site build from
+real assumptions through the same engine and the same generator the product
+uses. Their competitive sections are deliberately empty: no competitor and no
+citation is invented, even for a demonstration, so three of the four are blocked
+by the product's own review and say so on the page.
+
 ## Free tools
 
 Seven ungated calculators running the same modules as the product, entirely in
@@ -59,3 +67,7 @@ debt service coverage, unit economics, break-even, and burn and runway.
 - Free calculators: https://getventurely.com/tools
 - Plans by industry: https://getventurely.com/industries
 - Security: https://getventurely.com/security
+- Learn hub: https://getventurely.com/learn
+- Glossary: https://getventurely.com/learn/glossary
+- Sample plans: https://getventurely.com/examples
+- Comparisons: https://getventurely.com/compare

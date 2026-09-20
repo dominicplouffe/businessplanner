@@ -14,13 +14,15 @@ export const solutionsNav: NavLink[] = [
   { label: "Immigration plans", href: "/solutions/immigration", blurb: "E-2, L-1A and EB-5 document structure." },
 ];
 
-/* Everything below points at a route that exists. The nav used to run ahead of
-   the build — sixteen entries, most of them 404 — on a site whose entire
-   positioning is credibility. The Learn hub and Examples come back when their
-   pages do, not before. */
+/* Everything below points at a route that exists, and a test enforces it. The
+   nav used to run ahead of the build — sixteen entries, most of them 404 — on a
+   site whose entire positioning is credibility. */
 export const resourcesNav: NavLink[] = [
+  { label: "Learn", href: "/learn", blurb: "How to write a plan a lender will fund." },
+  { label: "Sample plans", href: "/examples", blurb: "Four complete plans, readable end to end." },
   { label: "Free tools", href: "/tools", blurb: "Seven calculators on the real engine." },
   { label: "Industries", href: "/industries", blurb: "Benchmarks and cost structures by sector." },
+  { label: "Glossary", href: "/learn/glossary", blurb: "The words on the other side of the table." },
   { label: "Methodology", href: "/learn/methodology", blurb: "Exactly how we compute what we compute." },
 ];
 
@@ -28,6 +30,15 @@ export const footerNav: { heading: string; links: NavLink[] }[] = [
   { heading: "Product", links: productNav },
   { heading: "Solutions", links: solutionsNav },
   { heading: "Resources", links: resourcesNav },
+  {
+    heading: "Compare",
+    links: [
+      { label: "vs LivePlan", href: "/compare/liveplan" },
+      { label: "vs Upmetrics", href: "/compare/upmetrics" },
+      { label: "vs a general AI", href: "/compare/chatgpt" },
+      { label: "All comparisons", href: "/compare" },
+    ],
+  },
   {
     heading: "Company",
     links: [

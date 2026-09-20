@@ -5,6 +5,7 @@ import { FixtureGenerator } from "./fixture-generator";
 
 export * from "./types";
 export { buildFactsBlock } from "./context";
+export { composeSection } from "./fixture-generator";
 
 /**
  * Picks the generator by whether a key is configured.

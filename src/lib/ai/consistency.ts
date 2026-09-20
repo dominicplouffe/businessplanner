@@ -280,10 +280,13 @@ export function buildModelIndex(
       // Only the drivers that can appear in prose as a marked figure. A raw
       // count like "210 covers a day" is not extractable, so indexing it would
       // do nothing but widen the pool a real claim could wrongly match.
-      const kind: FigureKind | null = /rate|percent|utilisation|share|margin|churn/i.test(key)
-        ? "percent"
-        : /price|ticket|cost|value|gmv|cpm|revenue|fee/i.test(key)
-          ? "currency"
+      // Currency is tested first, because `hourlyRate` is money and would
+      // otherwise be caught by the `rate` pattern and indexed as 18,500% —
+      // which left a consulting plan's own rate card reported as fabricated.
+      const kind: FigureKind | null = /price|ticket|cost|value|gmv|cpm|revenue|fee|hourlyrate/i.test(key)
+        ? "currency"
+        : /rate|percent|utilisation|share|margin|churn/i.test(key)
+          ? "percent"
           : null;
       if (kind) add(value, kind, `${stream.name}: ${humaniseKey(key)}`);
     }

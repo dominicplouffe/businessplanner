@@ -5,6 +5,9 @@ import { INDUSTRY_PAGES } from "@/lib/content/industries";
 import { TOOL_PAGES } from "@/lib/content/tools";
 import { LEGAL_DOCUMENTS } from "@/lib/content/legal";
 import { SOLUTION_PAGES } from "@/lib/content/solutions";
+import { ARTICLES } from "@/lib/content/learn";
+import { EXAMPLE_PLANS } from "@/lib/content/examples";
+import { COMPARE_PAGES } from "@/lib/content/compare";
 
 /* The sitemap is built from the content collections plus the handful of
    one-off routes, and deliberately NOT from nav.ts: the nav points ahead at
@@ -16,6 +19,10 @@ const SINGLETONS: { path: string; priority: number; changeFrequency: "weekly" | 
   { path: "/pricing", priority: 0.8, changeFrequency: "monthly" },
   { path: "/industries", priority: 0.8, changeFrequency: "monthly" },
   { path: "/tools", priority: 0.8, changeFrequency: "monthly" },
+  { path: "/learn", priority: 0.8, changeFrequency: "monthly" },
+  { path: "/examples", priority: 0.8, changeFrequency: "monthly" },
+  { path: "/compare", priority: 0.6, changeFrequency: "monthly" },
+  { path: "/learn/glossary", priority: 0.7, changeFrequency: "monthly" },
   { path: "/learn/methodology", priority: 0.7, changeFrequency: "monthly" },
   { path: "/about", priority: 0.5, changeFrequency: "monthly" },
   { path: "/security", priority: 0.5, changeFrequency: "monthly" },
@@ -40,6 +47,21 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...TOOL_PAGES.map((t) => ({
       path: `/tools/${t.slug}`,
       priority: 0.7,
+      changeFrequency: "monthly" as const,
+    })),
+    ...ARTICLES.map((a) => ({
+      path: `/learn/${a.slug}`,
+      priority: 0.7,
+      changeFrequency: "monthly" as const,
+    })),
+    ...EXAMPLE_PLANS.map((e) => ({
+      path: `/examples/${e.slug}`,
+      priority: 0.7,
+      changeFrequency: "monthly" as const,
+    })),
+    ...COMPARE_PAGES.map((c) => ({
+      path: `/compare/${c.slug}`,
+      priority: 0.6,
       changeFrequency: "monthly" as const,
     })),
     ...SOLUTION_PAGES.map((p) => ({
