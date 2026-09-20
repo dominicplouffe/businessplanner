@@ -211,7 +211,24 @@ function writeDrivers(sheet: ExcelJS.Worksheet, doc: ExportDocument): DriverCell
     section(`Revenue — ${stream.name}`);
     put(`revenueStreams.${i}.startMonth`, "First billing month", stream.startMonth, "0");
     for (const [key, value] of Object.entries(stream)) {
-      if (typeof value !== "number" || key === "startMonth") continue;
+      if (key === "startMonth") continue;
+      // The growth curve is a nested object, and the loop below only writes
+      // numbers. Skipping it silently would leave the formulas with no cell to
+      // point at, and `d()` used to answer a missing driver with "0" — a
+      // workbook that shows zero growth while the engine compounds. Descend.
+      if (key === "growth" && value && typeof value === "object") {
+        for (const [curveKey, curveValue] of Object.entries(value)) {
+          if (typeof curveValue !== "number") continue;
+          put(
+            `revenueStreams.${i}.growth.${curveKey}`,
+            humanise(curveKey),
+            curveValue,
+            /rate/i.test(curveKey) ? RATE : "#,##0.00",
+          );
+        }
+        continue;
+      }
+      if (typeof value !== "number") continue;
       put(
         `revenueStreams.${i}.${key}`,
         humanise(key),
@@ -367,7 +384,27 @@ function writeStream(
   cells: DriverCells,
   months: number,
 ): { revenue: number; cogs: number; deferred: number | null; nextRow: number } {
-  const d = (key: string) => cells.ref[`revenueStreams.${index}.${key}`] ?? "0";
+  /**
+   * The cell holding a driver.
+   *
+   * Throws rather than falling back to "0". A missing driver used to produce a
+   * formula that read as zero growth — a workbook that looks perfect and
+   * disagrees with the plan beside it, which is the exact failure the
+   * workbook-equals-engine test exists to prevent. Better to fail the export.
+   */
+  const d = (key: string) => {
+    const ref = cells.ref[`revenueStreams.${index}.${key}`];
+    if (!ref) {
+      throw new Error(
+        `No driver cell for revenueStreams.${index}.${key} — the workbook would ` +
+          `silently disagree with the engine. Check the driver sheet writer.`,
+      );
+    }
+    return ref;
+  };
+  /** For genuinely optional drivers, where absence is a shape rather than a bug. */
+  const dOpt = (key: string, fallback: string) =>
+    cells.ref[`revenueStreams.${index}.${key}`] ?? fallback;
   const start = d("startMonth");
   const season = (m: number) => {
     const range = cells.seasonality[stream.id];
@@ -377,6 +414,66 @@ function writeStream(
   };
   /** Months since this stream started billing, floored at zero. */
   const elapsed = (m: number) => `MAX(0,${m}-${start})`;
+
+  /**
+   * The growth curve, as a live Excel expression.
+   *
+   * This is `projectCurve` from src/lib/finance/growth.ts written in cell
+   * references, branch for branch. It is the reason that module uses POWER and
+   * never EXP or LN: the two have to be the same expression, or the workbook
+   * stops being the model and becomes a picture of one. `tests/xlsx.test.ts`
+   * evaluates this against the engine month by month.
+   */
+  const curveAt = (v0: string, m: number): string => {
+    const t = elapsed(m);
+    const curve = stream.growth;
+
+    if (!curve) {
+      // No curve: the legacy rate, unbounded. Byte-for-byte the string this
+      // exporter has always emitted.
+      switch (stream.kind) {
+        case "hourly-services":
+          return `${v0}+${d("headcountGrowthPerMonth")}*${t}`;
+        case "subscription":
+          return `${v0}*POWER(1+${d("newCustomerGrowthRate")},${t})`;
+        case "contract":
+          return v0;
+        default:
+          return `${v0}*POWER(1+${d("monthlyGrowthRate")},${t})`;
+      }
+    }
+
+    switch (curve.shape) {
+      case "flat":
+        return v0;
+      case "linear": {
+        const perMonth = d("growth.perMonth");
+        const raw = `${v0}+${perMonth}*${t}`;
+        const max = dOpt("growth.max", "");
+        return max ? `MIN(${raw},${max})` : raw;
+      }
+      case "unbounded":
+        return `${v0}*POWER(1+${d("growth.monthlyRate")},${t})`;
+      case "saturating": {
+        const rate = d("growth.monthlyRate");
+        const ceiling = d("growth.ceiling");
+        const term = d("growth.terminalAnnualRate");
+        const drift = `${ceiling}*POWER(1+${term},${t}/12)`;
+        const a = `((${ceiling}-${v0})/${v0})`;
+        const b = `(((1+${a})/(1+${rate})-1)/${a})`;
+        const overCapacity = `${drift}/(1+${a}*POWER(1+ABS(${rate}),-${t}))`;
+        const saturates = `IF(${t}=0,${v0},${drift})`;
+        const logistic = `${drift}/(1+${a}*POWER(${b},${t}))`;
+        return [
+          `IF(${v0}<=0,0,`,
+          `IF(${rate}<=0,${v0}*POWER(1+${rate},${t}),`,
+          `IF(${ceiling}=${v0},${drift},`,
+          `IF(${ceiling}<${v0},${overCapacity},`,
+          `IF(${b}<=0,${saturates},${logistic})))))`,
+        ].join("");
+      }
+    }
+  };
   const live = (m: number, body: string) => `=IF(${m}<${start},0,${body})`;
 
   let row = startRow;
@@ -391,7 +488,7 @@ function writeStream(
           m,
           m === 1
             ? `${d("initialCustomers")}*(1-${d("monthlyChurnRate")})+${d("newCustomersMonth1")}`
-            : `IF(${m}=${start},${d("initialCustomers")},${col === prev ? 0 : `${prev}${row}`})*(1-${d("monthlyChurnRate")})+${d("newCustomersMonth1")}*POWER(1+${d("newCustomerGrowthRate")},${elapsed(m)})`,
+            : `IF(${m}=${start},${d("initialCustomers")},${col === prev ? 0 : `${prev}${row}`})*(1-${d("monthlyChurnRate")})+${curveAt(d("newCustomersMonth1"), m)}`,
         ),
       { format: "#,##0", unit: "customers" });
       row += 1;
@@ -412,7 +509,7 @@ function writeStream(
 
     case "unit-sales": {
       volumeRow = formulaRow(sheet, row, "Units", months, (m) =>
-        live(m, `${d("unitsMonth1")}*POWER(1+${d("monthlyGrowthRate")},${elapsed(m)})*${season(m)}`),
+        live(m, `${curveAt(d("unitsMonth1"), m)}*${season(m)}`),
       { format: "#,##0", unit: "units" });
       row += 1;
       revenueRow = formulaRow(sheet, row, "Revenue", months, (m, col) =>
@@ -424,7 +521,7 @@ function writeStream(
 
     case "hourly-services": {
       const headsRow = formulaRow(sheet, row, "Billable heads", months, (m) =>
-        live(m, `${d("billableHeadcount")}+${d("headcountGrowthPerMonth")}*${elapsed(m)}`),
+        live(m, curveAt(d("billableHeadcount"), m)),
       { format: "#,##0.0", unit: "people" });
       row += 1;
       volumeRow = formulaRow(sheet, row, "Billable hours", months, (m, col) =>
@@ -442,7 +539,7 @@ function writeStream(
       volumeRow = formulaRow(sheet, row, "Transactions", months, (m) =>
         live(
           m,
-          `${d("dailyTraffic")}*${d("conversionRate")}*${d("openDaysPerMonth")}*POWER(1+${d("monthlyGrowthRate")},${elapsed(m)})*${season(m)}`,
+          `${curveAt(`(${d("dailyTraffic")}*${d("conversionRate")}*${d("openDaysPerMonth")})`, m)}*${season(m)}`,
         ),
       { format: "#,##0", unit: "transactions" });
       row += 1;
@@ -455,7 +552,7 @@ function writeStream(
 
     case "marketplace": {
       volumeRow = formulaRow(sheet, row, "Gross merchandise value", months, (m) =>
-        live(m, `${d("gmvMonth1")}*POWER(1+${d("monthlyGrowthRate")},${elapsed(m)})*${season(m)}`),
+        live(m, `${curveAt(d("gmvMonth1"), m)}*${season(m)}`),
       { unit: "GMV" });
       row += 1;
       revenueRow = formulaRow(sheet, row, "Revenue", months, (m, col) =>
@@ -485,7 +582,7 @@ function writeStream(
 
     case "advertising": {
       const impressionsRow = formulaRow(sheet, row, "Impressions", months, (m) =>
-        live(m, `${d("impressionsMonth1")}*POWER(1+${d("monthlyGrowthRate")},${elapsed(m)})*${season(m)}`),
+        live(m, `${curveAt(d("impressionsMonth1"), m)}*${season(m)}`),
       { format: "#,##0", unit: "impressions" });
       row += 1;
       volumeRow = formulaRow(sheet, row, "Impressions sold", months, (m, col) =>

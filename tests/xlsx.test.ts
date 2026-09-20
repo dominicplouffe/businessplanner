@@ -4,7 +4,7 @@ import { buildExportDocument, type ExportDocument } from "@/lib/export/document"
 import { loadWorkbook, colLetter, type Sheet } from "./helpers/xlsx-eval";
 import { buildModel } from "@/lib/finance/engine";
 import { computeMetrics } from "@/lib/finance/metrics";
-import { AssumptionsSchema } from "@/lib/finance/types";
+import { AssumptionsSchema, type AssumptionsInput } from "@/lib/finance/types";
 import { restaurantPlan, saasPlan } from "./fixtures";
 
 const FIRST_MONTH_COL = 3;
@@ -72,9 +72,26 @@ describe("the workbook reproduces the engine", () => {
    * disagreed with the plan it was exported beside would be the single most
    * damaging defect in the product.
    */
+  /* A plan whose stream carries a saturating curve, so the piecewise growth
+     formula is evaluated against the engine rather than only the legacy
+     `POWER(1+rate,t)` path. Without this, a wrong curve formula would ship
+     looking perfect: exceljs writes formulas and never evaluates them. */
+  const subscriptionStream = saasPlan.revenueStreams?.[0];
+  if (!subscriptionStream) throw new Error("the SaaS fixture must carry a stream to cap");
+  const cappedPlan: AssumptionsInput = {
+    ...saasPlan,
+    revenueStreams: [
+      {
+        ...subscriptionStream,
+        growth: { shape: "saturating", monthlyRate: 0.08, ceiling: 260, terminalAnnualRate: 0.02 },
+      },
+    ],
+  };
+
   for (const [name, plan] of [
     ["restaurant (footfall, inventory, SBA debt)", restaurantPlan],
     ["SaaS (subscription, churn, expansion)", saasPlan],
+    ["SaaS with a capacity ceiling (saturating curve)", cappedPlan],
   ] as const) {
     describe(name, () => {
       let sheet: Sheet;
