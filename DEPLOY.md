@@ -12,13 +12,24 @@ away from cheaper — see *Making it cheaper* at the end.
 ## What you need before you start
 
 - An AWS account, and credentials with admin rights **for the one-time setup
-  only**. The ongoing deploys use a scoped role.
+  only**. The ongoing deploys use a scoped role. Check them with
+  `aws sts get-caller-identity` before anything else; nothing below works until
+  that prints an account.
 - `getventurely.com` in Route 53 as a **hosted zone in that same account**. If
   the domain is registered elsewhere, point its nameservers at the Route 53
-  zone and wait for that to propagate before step 3 — certificate validation
-  will otherwise sit pending forever.
-- Node 22 and the AWS CLI v2 locally.
+  zone and wait for that to propagate before creating the infrastructure —
+  certificate validation will otherwise sit pending forever.
+- Node 22, the AWS CLI v2, and Docker. `jq` and `openssl` are *not* needed:
+  `scripts/deploy.mjs` does both jobs with `JSON.stringify` and
+  `crypto.randomBytes`.
 - A Stripe account. Test mode is fine to start.
+
+**`.env` has nothing to do with any of this.** It is gitignored, it is not
+copied into the image, and neither the AWS CLI nor CDK reads it. Every variable
+the running container sees comes from the ECS task definition, which CDK writes:
+four values from Secrets Manager, `DATABASE_URL` assembled from the
+RDS-managed secret, and the rest derived from the domain. Fill `.env` only to
+run `pnpm dev` or the image locally.
 
 ---
 
@@ -52,15 +63,108 @@ A staging deployment overrides all of it with `NEXT_PUBLIC_SITE_URL` and
 `--context domainName=`, so nothing here is a hardcode in the sense the
 project's rules forbid.
 
-## 2. Bootstrap CDK
+## 2. Run it
+
+```bash
+pnpm deploy:aws
+```
+
+That is the whole deploy. It asks for everything it needs, checks what has
+already been done before doing anything, and can be run again after a failure —
+which matters, because the longest step takes twenty-five minutes and the first
+real run of it failed ten minutes in.
+
+```
+pnpm deploy:aws --dry-run    # every question and every command, writing nothing
+pnpm deploy:aws --from=5     # resume at a step
+pnpm deploy:aws --help
+```
+
+It asks: region, domain, production or staging sizing, `BETTER_AUTH_SECRET`
+(offering to generate one), `STRIPE_SECRET_KEY`, `ANTHROPIC_API_KEY` (which may
+be empty), the image tag, and later the `STRIPE_WEBHOOK_SECRET` and the GitHub
+repository. The account and the hosted zone it works out for itself and asks you
+to confirm.
+
+Three things it does that a runbook cannot:
+
+- **It checks the deploy before starting it.** The database configuration is read
+  out of the synthesised template and put to
+  `aws rds describe-orderable-db-instance-options`. `Cannot find version 17.2
+  for postgres` — the failure that cost the first attempt ten minutes — becomes
+  two seconds, and it prints the versions that *are* available.
+- **It cleans up after a failed attempt**, including the two resources that
+  survive a rollback and then collide silently. See the next section.
+- **It never writes a secret down.** Answers persist to `.deploy.json` (ignored
+  by git) so a re-run does not re-ask; the four secret values are held in memory,
+  written straight to Secrets Manager, and redacted even from `--dry-run`
+  output. `tests/deploy.test.ts` asserts that mechanically, because "we are
+  careful" is not a guarantee.
+
+**The Stripe webhook is a two-pass affair and cannot be otherwise.** Stripe
+issues the signing secret when the endpoint is created, the endpoint needs the
+live URL, and the app refuses to boot without *some* value — so the script writes
+a marked placeholder, brings the service up, prints the endpoint and the four
+events, waits, then stores the real secret and forces a new deployment. It does
+not report success while the placeholder is in place: the webhook is the only
+code that grants an entitlement, so a deploy stuck there takes money and
+delivers nothing.
+
+Everything from here down is what the script does, step by step, in case you
+want to do it by hand or a step needs unpicking.
+
+---
+
+## If an earlier attempt failed
+
+A stack in `ROLLBACK_COMPLETE` cannot be updated — it has to be deleted. And
+deleting it exposes **two resources that survive the delete** and then collide on
+the next create, neither with an error that mentions the rollback:
+
+| Resource | Why it survives | What you see next time |
+|---|---|---|
+| ECR repository `venturelly` | `removalPolicy: RETAIN`, fixed name | `… with identifier 'venturelly' already exists` |
+| Secret `getventurely.com/app` | CloudFormation deletes a secret with a 30-day recovery window, and the name is fixed | `… a secret with this name is already scheduled for deletion` |
+
+`pnpm deploy:aws` detects all three and offers to clear them, one confirmation
+each. By hand, in this order — the stack first, because deleting it is what
+strands the other two:
+
+```bash
+aws cloudformation delete-stack --stack-name VenturellySite --region us-east-1
+aws cloudformation wait stack-delete-complete --stack-name VenturellySite --region us-east-1
+
+# Only if they are there. --force is needed if the repository holds images.
+aws ecr delete-repository --repository-name venturelly --region us-east-1
+aws secretsmanager restore-secret --secret-id getventurely.com/app --region us-east-1
+aws secretsmanager delete-secret --secret-id getventurely.com/app \
+  --force-delete-without-recovery --region us-east-1
+```
+
+`VenturellyCertificate` is a separate stack; if it succeeded, leave it alone.
+
+A stack in `DELETE_FAILED`, `ROLLBACK_FAILED` or `UPDATE_ROLLBACK_FAILED` is
+different: it needs `--retain-resources` and a decision about what to keep, so
+the script refuses to guess and hands it back with the command that shows what
+failed.
+
+**Never pin a minor engine version.** `infra/lib/site-stack.ts` asks for
+`PostgresEngineVersion.VER_17` — the major version only — so RDS uses whatever
+minor is current. It was briefly `VER_17_2`, which AWS had retired, and a pinned
+minor is a deploy that stops working on a date nobody wrote down.
+`tests/deploy.test.ts` fails on any pin narrower than a major version.
+
+---
+
+## 3. Bootstrap CDK
 
 Once per account and region. Uses your admin credentials.
 
 **Set the account first.** `cdk bootstrap` synthesises the app before it
 bootstraps anything, and both stacks resolve a Route 53 hosted zone, which
-needs a concrete account and region. This used to be step 3, after the command
-that needs it — which meant following these instructions exactly produced an
-error on the very first command.
+needs a concrete account and region. The `export` lines used to come *after*
+this command rather than before it, which meant following these instructions
+exactly produced an error on the very first one.
 
 ```bash
 cd infra
@@ -84,7 +188,7 @@ up. Worth using: a lookup against a zone that does not exist yet does not fail,
 it returns a placeholder and lets the deploy run until certificate validation
 hangs with nothing to explain it. `aws route53 list-hosted-zones` has the id.
 
-## 3. Create the infrastructure
+## 4. Create the infrastructure
 
 The first run takes about 25 minutes — most of it is RDS and CloudFront. ACM
 validates against Route 53 automatically because the stack owns the DNS records.
@@ -97,44 +201,67 @@ npx cdk deploy VenturellyCertificate VenturellySite \
 ```
 
 > The service will not start yet. It is pointed at an image tag that does not
-> exist, and the secrets below are empty. Both are fixed in the next two steps.
+> exist, and the secrets below are empty. Both are fixed in steps 5 and 6.
 > Expect the ECS service to sit at 0/2 healthy tasks until then — that is
 > correct, not a failure.
 
 Write down the outputs. You need `EcrRepositoryUri` and `AppSecretArn`.
 
-## 4. Fill in the application secrets
+## 5. Fill in the application secrets
 
 The stack creates the secret empty on purpose: a value passed through CDK ends
 up in CloudFormation's event history and in every `cdk diff` anybody runs
 afterwards.
 
+Generate the auth secret, then write all four keys at once:
+
 ```bash
+node -e 'console.log(require("crypto").randomBytes(48).toString("base64"))'
+
 aws secretsmanager put-secret-value \
+  --region us-east-1 \
   --secret-id getventurely.com/app \
-  --secret-string "$(jq -n \
-      --arg auth "$(openssl rand -base64 48)" \
-      --arg stripe "sk_test_…" \
-      --arg whsec "whsec_…" \
-      --arg anthropic "sk-ant-…" \
-      '{BETTER_AUTH_SECRET:$auth, STRIPE_SECRET_KEY:$stripe, STRIPE_WEBHOOK_SECRET:$whsec, ANTHROPIC_API_KEY:$anthropic}')"
+  --secret-string '{
+    "BETTER_AUTH_SECRET":    "<the 48 bytes above>",
+    "STRIPE_SECRET_KEY":     "sk_test_…",
+    "STRIPE_WEBHOOK_SECRET": "whsec_…",
+    "ANTHROPIC_API_KEY":     "sk-ant-…"
+  }'
 ```
 
-All four keys must be present. The app **refuses to start** without the auth
-secret or either Stripe key — see `src/lib/env.ts`. That is deliberate: without
-the Stripe keys the billing layer falls back to a development provider that
-grants entitlements with no payment, and it must never run in production.
+**All four keys must be present**, and only these four. The app **refuses to
+start** without the auth secret or either Stripe key — see `src/lib/env.ts`.
+That is deliberate: without the Stripe keys the billing layer falls back to a
+development provider that grants entitlements with no payment, and it must never
+run in production. A key added here that the task definition does not read looks
+configured and reaches nothing, which is why `tests/deploy.test.ts` checks this
+list against `infra/lib/site-stack.ts` rather than trusting either.
+
+`DATABASE_URL` is **not** one of them. It is assembled from the RDS-managed
+secret's `uri` field in the task definition, so there is one copy of the password
+and a rotation does not need a second value updating in step.
 
 `ANTHROPIC_API_KEY` may be an empty string. The product then writes prose with
 the deterministic generator instead, which is a real mode, not a degraded one.
 
-## 5. Build and push the first image
+The webhook secret does not exist yet — see step 7. Put a placeholder here and
+come back to it; the app needs *a* value to boot.
+
+A secret is read when a task starts, so changing any of these later means
+forcing a new deployment:
+
+```bash
+aws ecs update-service --cluster <ClusterName> --service <ServiceName> \
+  --force-new-deployment --region us-east-1
+```
+
+## 6. Build and push the first image
 
 ```bash
 aws ecr get-login-password --region us-east-1 \
   | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
 
-docker build \
+docker build --platform linux/amd64 \
   --build-arg NEXT_PUBLIC_SITE_URL=https://getventurely.com \
   -t <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/venturelly:first .
 
@@ -144,11 +271,16 @@ cd infra && npx cdk deploy VenturellySite \
   --context domainName=getventurely.com --context imageTag=first
 ```
 
+**`--platform linux/amd64` is not optional.** The task definition pins X86_64,
+so an image built on an Apple Silicon machine without it runs as arm64 and the
+container dies with `exec format error` — which reads as an application fault
+and is not one.
+
 The container applies the Prisma migrations on start, before it binds a port.
 A failed migration stops the task rather than serving traffic against a schema
 it does not match.
 
-## 6. Point Stripe at the webhook
+## 7. Point Stripe at the webhook
 
 In the Stripe dashboard, add an endpoint at:
 
@@ -175,7 +307,7 @@ aws ecs update-service --cluster <ClusterName> --service <ServiceName> \
 entitlement — not the page, not the redirect back from checkout. Without it,
 customers will pay and receive nothing.
 
-## 7. Set up the GitHub deploy role
+## 8. Set up the GitHub deploy role
 
 So CI never holds a long-lived key.
 

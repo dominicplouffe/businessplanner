@@ -313,13 +313,52 @@ a startup failure rather than a runtime fallback to `DevBilling`.
 
 The infrastructure is CDK in `infra/`: ECS Fargate behind an ALB behind
 CloudFront, RDS Postgres Multi-AZ, the certificate in its own us-east-1 stack
-because CloudFront accepts no other region. `DEPLOY.md` is the runbook.
+because CloudFront accepts no other region. `DEPLOY.md` is the runbook and
+`pnpm deploy:aws` (`scripts/deploy.mjs`) is the runbook made executable — it
+asks for what it needs, checks each step against AWS before doing it, and is
+re-runnable, which is what a twenty-five-minute step requires. It is Node with
+no dependencies specifically so that `jq` and `openssl` are not prerequisites:
+`JSON.stringify` and `crypto.randomBytes` do both jobs.
+
+**Pin a major engine version, never a minor.** `VER_17_2` failed the first real
+deploy ten minutes in with `Cannot find version 17.2 for postgres` — AWS retires
+Postgres minors on a schedule, so a pinned minor is a deploy that stops working
+on a date nobody wrote down. `VER_17` renders `EngineVersion: "17"` and RDS uses
+the current default. `tests/deploy.test.ts` fails on anything narrower.
+
+**A rollback is not a clean slate.** Two resources survive one and then collide
+on the next create with errors that do not mention the rollback: the ECR
+repository carries `removalPolicy: RETAIN` with a fixed name, and CloudFormation
+deletes a Secrets Manager secret with a thirty-day recovery window that keeps the
+name reserved. The stack has to be deleted first, then both cleared. The script
+does all three with a confirmation each; a `DELETE_FAILED` or `ROLLBACK_FAILED`
+it refuses, because that needs `--retain-resources` and a decision about what to
+keep.
+
+**The deploy script writes answers down and never secrets.** `.deploy.json`
+(gitignored) carries region, account, domain and zone so a re-run does not
+re-ask. The four secret values go straight to Secrets Manager and are redacted
+even from `--dry-run` output. `answersToPersist()` is an allow-list rather than a
+deny-list, so a key added to the prompts later cannot leak by being forgotten,
+and `tests/deploy.test.ts` asserts no secret survives serialisation.
+
+**`STRIPE_WEBHOOK_SECRET` is inherently a second pass.** Stripe issues it when
+the endpoint is created, the endpoint needs the live URL, and the boot guard
+refuses to start without a value — so a marked placeholder goes in first and is
+replaced once the service is up. Nothing may report the deploy finished while
+that placeholder is in place: the webhook is the only code that grants an
+entitlement.
+
+`--platform linux/amd64` on `docker build` is not optional. The task definition
+pins X86_64, and an arm64 image dies with `exec format error`, which reads as an
+application fault.
 
 `.github/workflows/ci.yml` verifies every pull request and non-main branch,
 including a container build, because the image is the artefact that ships — a
 broken Dockerfile should fail on a branch rather than during a deploy.
 `deploy.yml` runs on push to `main` and stops on its first step, naming the
-missing `AWS_DEPLOY_ROLE_ARN`, until step 7 of DEPLOY.md has been done.
+missing `AWS_DEPLOY_ROLE_ARN`, until the GitHub deploy role step of DEPLOY.md
+has been done.
 
 **You cannot edit either file from an agent session.** GitHub refuses a push that
 writes under `.github/workflows/` unless the credential carries the `workflow`

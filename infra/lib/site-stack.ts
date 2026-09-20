@@ -100,8 +100,18 @@ export class SiteStack extends Stack {
     const database = new rds.DatabaseInstance(this, "Database", {
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      /* The major version only, deliberately.
+
+         This was pinned to `VER_17_2` and the first deploy failed ten minutes
+         in with `Cannot find version 17.2 for postgres`: AWS retires Postgres
+         minor versions on a schedule, so a pinned minor is a deploy that stops
+         working on a date nobody wrote down. `VER_17` renders `EngineVersion:
+         "17"`, which RDS reads as the current default minor of 17, and
+         `autoMinorVersionUpgrade` keeps it patched from there. The parameter
+         group family derives from the *major* version either way, so it is
+         unchanged at `postgres17`. */
       engine: rds.DatabaseInstanceEngine.postgres({
-        version: rds.PostgresEngineVersion.VER_17_2,
+        version: rds.PostgresEngineVersion.VER_17,
       }),
       instanceType: isProduction
         ? ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.SMALL)

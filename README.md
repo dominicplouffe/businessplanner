@@ -59,7 +59,7 @@ pnpm dev          # dev server
 pnpm build        # production build
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
-pnpm test         # vitest — 322 tests; the engine suite is the quality gate
+pnpm test         # vitest — 415 tests; the engine suite is the quality gate
 pnpm e2e          # real browser: sign up → intake → generate → pay → export
 pnpm db:push      # apply the Prisma schema to the local database
 ```
@@ -88,10 +88,25 @@ before changing the engine, the statement shaping, or the token layer.
 
 ## Deploying
 
-`DEPLOY.md` is the runbook: CDK bootstrap, the stack, the application secret,
-the first image, the Stripe endpoint, and the GitHub OIDC deploy role. It also
-lists what is still open before a real launch — counsel review of the legal
+```
+pnpm deploy:aws              # the whole deploy, one question at a time
+pnpm deploy:aws --dry-run    # every question and command, writing nothing
+```
+
+`scripts/deploy.mjs` walks the whole thing: preflight, CDK bootstrap, the stacks,
+the application secret, the image, the Stripe endpoint and the GitHub OIDC deploy
+role. It asks for every value it needs, checks each step against AWS before doing
+it — so a re-run resumes rather than repeating — and validates the database
+configuration against `describe-orderable-db-instance-options` before starting a
+twenty-five-minute deploy. Answers persist to `.deploy.json`; the four secret
+values never touch disk, which `tests/deploy.test.ts` asserts.
+
+`DEPLOY.md` is the same ground by hand, plus the recovery path for a failed first
+create and what is still open before a real launch — counsel review of the legal
 documents, and the regulatory verification queue.
+
+`.env` is for local development only. Nothing in the deploy reads it: the
+container's environment comes from the ECS task definition.
 
 ## Licence
 

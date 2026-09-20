@@ -13,3 +13,7 @@ coverage/
 prisma/dev.db*
 /test-results/
 /playwright-report/
+
+# Answers the deploy script remembers between runs. Never secrets — see
+# scripts/lib/deploy-config.mjs and the invariant test in tests/deploy.test.ts.
+.deploy.json
