@@ -82,7 +82,7 @@ async function readEvent(request: NextRequest, raw: string): Promise<Stripe.Even
   const isDevEvent =
     process.env.NODE_ENV !== "production" &&
     !billingIsLive() &&
-    request.headers.get("x-venturally-dev-webhook") === "1";
+    request.headers.get("x-venturelly-dev-webhook") === "1";
 
   if (isDevEvent) {
     const parsed = JSON.parse(raw) as Stripe.Event;

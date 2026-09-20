@@ -1,4 +1,4 @@
-# Venturally
+# Venturelly
 
 > Investor- and lender-grade business plans built on a deterministic financial
 > model. Every figure in every statement is computed by an engine, not written

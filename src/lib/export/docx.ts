@@ -211,7 +211,7 @@ export async function buildDocx(doc: ExportDocument): Promise<Buffer> {
   }
 
   const document = new Document({
-    creator: "Venturally",
+    creator: "Venturelly",
     title: `${doc.companyName} — business plan`,
     styles: {
       default: {

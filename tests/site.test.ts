@@ -246,18 +246,38 @@ describe("sample plans", () => {
 });
 
 /* ==========================================================================
-   One spelling of the domain.
+   One spelling of the name, and one of the domain.
    --------------------------------------------------------------------------
-   Three near-misses coexisted in this repo before the domain was settled: the
-   brand word *Venturally*, a placeholder origin, and social handles, none of
-   which matched. The brand word is allowed to differ from the domain — it is a
-   different string on purpose. The domain is not allowed to differ from itself,
-   and a review comment is not what stops that recurring.
+   The brand is **Venturelly** and the domain is **getventurely.com** — one `l`
+   apart, deliberately. Getting there took several passes, and at different
+   points the tree held *Venturally*, *getventuraly*, *getventurally* and a
+   handle spelled a fourth way. Each was fixed by hand and each came back,
+   because a rename is a hundred small edits and the survivors hide in copy
+   nobody re-reads.
+
+   So the spelling is a test. Both halves scan real files rather than asserting
+   on `brand.ts`: the point is to catch the string typed straight into a heading
+   or a comment, which is exactly what `brand.ts` cannot protect.
    ========================================================================== */
-describe("the domain", () => {
+describe("the name and the domain", () => {
   const ROOTS = ["src", "public", "infra/bin", "infra/lib", ".github/workflows"];
   const FILES = ["README.md", "DEPLOY.md", "CLAUDE.md", "Dockerfile", ".env.example"];
-  const WRONG = /getventur(?!ely\b)[a-z]*\.com/gi;
+
+  /** Any getventur*.com that is not the one domain. */
+  const WRONG_DOMAIN = /getventur(?!ely\b)[a-z]*\.com/gi;
+
+  /** The brand word misspelled. Word-anchored, so `getventurely` inside a URL is
+   *  not a hit and the runbook can still name the typo domains worth
+   *  registering. `VenturellySite` and friends are the correct word with a
+   *  suffix, so the alternatives are exact. */
+  const WRONG_BRAND = /\b(venturally|venturaly|venturely|venturelley)\b/gi;
+
+  /** The workflow files are exempt from the brand scan, and only that scan. They
+   *  carry the ECR repository name, and GitHub refuses a push that writes under
+   *  .github/workflows/ from a credential without the `workflow` scope — so an
+   *  agent session cannot rename it, and a test it cannot make pass would just
+   *  be a permanently red suite. DEPLOY.md carries the command instead. */
+  const BRAND_EXEMPT = /^\.github\/workflows\//;
 
   async function collect(dir: string, out: string[]): Promise<string[]> {
     const { readdir } = await import("node:fs/promises");
@@ -269,20 +289,39 @@ describe("the domain", () => {
     return out;
   }
 
-  it("is spelled getventurely.com everywhere it appears", async () => {
+  /** A line saying `spelling-exempt` is skipped. Some prose has to quote the
+   *  wrong spelling to tell somebody to fix it — the runbook's own remedy did,
+   *  and the check flagged it, which is the check working. The marker keeps that
+   *  legible rather than exempting a whole file and losing the coverage. */
+  const EXEMPT_LINE = /spelling-exempt/;
+
+  async function scan(pattern: RegExp, exemptPath?: RegExp): Promise<string[]> {
     const { readFile } = await import("node:fs/promises");
     const paths: string[] = [...FILES];
     for (const root of ROOTS) await collect(root, paths);
 
     const offenders: string[] = [];
     for (const path of paths) {
-      const text = await readFile(path, "utf8");
-      for (const hit of text.match(WRONG) ?? []) offenders.push(`${path}: ${hit}`);
+      if (exemptPath?.test(path)) continue;
+      const lines = (await readFile(path, "utf8")).split("\n");
+      lines.forEach((line, i) => {
+        if (EXEMPT_LINE.test(line)) return;
+        for (const hit of line.match(pattern) ?? []) offenders.push(`${path}:${i + 1}: ${hit}`);
+      });
     }
-    expect(offenders).toEqual([]);
+    return offenders;
+  }
+
+  it("is spelled getventurely.com everywhere it appears", async () => {
+    expect(await scan(WRONG_DOMAIN)).toEqual([]);
   });
 
-  it("derives the brand domain from the origin rather than restating it", () => {
+  it("spells the brand Venturelly everywhere it appears", async () => {
+    expect(await scan(WRONG_BRAND, BRAND_EXEMPT)).toEqual([]);
+  });
+
+  it("names the brand once, in brand.ts, and derives the domain from the origin", () => {
+    expect(brand.name).toBe("Venturelly");
     expect(brand.domain).toBe(brand.url.replace(/^https?:\/\//, ""));
   });
 });

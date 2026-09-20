@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ==========================================================================
-# Venturally
+# Venturelly
 # --------------------------------------------------------------------------
 # Three stages. The final image carries the standalone server bundle, the
 # Prisma engine, and Chromium — the PDF pipeline renders the live /print route

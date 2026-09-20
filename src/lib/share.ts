@@ -52,7 +52,7 @@ export async function recordShareView(input: {
 
 /** Salted so the hash cannot be reversed with a rainbow table of every IPv4. */
 function hashIp(ip: string): string {
-  const salt = process.env.BETTER_AUTH_SECRET ?? "venturally-share-salt";
+  const salt = process.env.BETTER_AUTH_SECRET ?? "venturelly-share-salt";
   return createHash("sha256").update(`${salt}:${ip}`).digest("hex").slice(0, 32);
 }
 

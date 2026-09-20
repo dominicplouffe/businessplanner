@@ -1,4 +1,4 @@
-# Venturally
+# Venturelly
 
 Investor- and lender-grade business plans, built on a real financial model.
 

@@ -1,5 +1,5 @@
 {
-  "name": "venturally-infra",
+  "name": "venturelly-infra",
   "version": "0.1.0",
   "private": true,
   "bin": { "infra": "bin/infra.js" },

@@ -14,13 +14,13 @@ const region = process.env.AWS_REGION ?? process.env.CDK_DEFAULT_REGION ?? "us-e
 const domainName = app.node.tryGetContext("domainName") ?? process.env.DOMAIN_NAME ?? "getventurely.com";
 const imageTag = app.node.tryGetContext("imageTag") ?? process.env.IMAGE_TAG ?? "latest";
 
-const certificate = new CertificateStack(app, "VenturallyCertificate", {
+const certificate = new CertificateStack(app, "VenturellyCertificate", {
   env: { account, region: "us-east-1" },
   crossRegionReferences: true,
   domainName,
 });
 
-new SiteStack(app, "VenturallySite", {
+new SiteStack(app, "VenturellySite", {
   // A hosted-zone lookup needs a concrete account and region — an
   // environment-agnostic stack cannot do it, and the failure is confusing.
   env: { account, region },

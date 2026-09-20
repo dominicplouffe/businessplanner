@@ -26,7 +26,7 @@ export default function HomePage() {
               The business plan your lender actually reads.
             </h1>
             <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-secondary sm:text-xl">
-              Most AI tools write confident prose over invented numbers. Venturally
+              Most AI tools write confident prose over invented numbers. Venturelly
               computes every figure from a real financial model, cites every market
               claim, and refuses to export a plan whose words contradict its
               spreadsheet.
@@ -154,7 +154,7 @@ export default function HomePage() {
         <SectionHeader
           eyebrow="Built for a specific reader"
           title="A plan is a document with an audience of one."
-          lede="What a credit committee needs and what a seed investor needs are different documents. Venturally builds for the reader you name."
+          lede="What a credit committee needs and what a seed investor needs are different documents. Venturelly builds for the reader you name."
         />
         <Container className="mt-14">
           <div className="grid gap-6 md:grid-cols-2">

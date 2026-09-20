@@ -25,7 +25,7 @@ function setEnv(values: Record<string, string | undefined>) {
 
 const COMPLETE = {
   NODE_ENV: "production",
-  DATABASE_URL: "postgresql://user:pass@db.internal:5432/venturally",
+  DATABASE_URL: "postgresql://user:pass@db.internal:5432/venturelly",
   BETTER_AUTH_SECRET: "a-real-secret",
   NEXT_PUBLIC_SITE_URL: "https://example.com",
   STRIPE_SECRET_KEY: "sk_live_x",

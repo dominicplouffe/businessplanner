@@ -48,7 +48,7 @@ export async function simulatePaymentAction(raw: unknown) {
       "Content-Type": "application/json",
       // One of the three gates in the webhook's own check. Without this the
       // handler demands a real Stripe signature and rejects the body.
-      "x-venturally-dev-webhook": "1",
+      "x-venturelly-dev-webhook": "1",
     },
     body: JSON.stringify(event),
   });

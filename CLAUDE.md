@@ -1,4 +1,4 @@
-# Venturally — working notes
+# Venturelly — working notes
 
 AI business-planning platform: a public marketing site and an application, in one
 Next.js app. Positioned against bizplanner.ai, LivePlan and Upmetrics, but
@@ -241,9 +241,19 @@ The origin is **getventurely.com** and that is settled. Nothing reads it as a
 literal: `src/lib/env.ts` exports `siteUrl` from `NEXT_PUBLIC_SITE_URL` with the
 production domain as the fallback, `brand.ts` derives `domain` and `url` from
 that, and the CDK app takes `--context domainName=`. A staging deployment
-overrides both and advertises its own canonicals. The brand word stays
-*Venturally*, which is not the same string as the domain — do not "fix" one to
-match the other.
+overrides both and advertises its own canonicals.
+
+**The brand word is Venturelly and the domain is getventurely.com.** They differ
+by one `l` and that is correct — do not "fix" either to match the other. Earlier
+spellings (the brand with an `a`, the domain with an `a`, the domain with a
+double `l`) were each fixed by hand and each came back, because a rename is a
+hundred small edits and the survivors hide in copy nobody re-reads. So
+`tests/site.test.ts` fails on any of them now. If that test fires, the spelling
+is the bug, not the test.
+
+The one exemption is the ECR repository name in `.github/workflows/deploy.yml`,
+which an agent session cannot edit — see the workflow note at the end of this
+section. DEPLOY.md carries the command that fixes it.
 
 `DATABASE_URL` alone decides the driver adapter, so there is no second flag to
 get out of step: a `postgres://` URL selects `@prisma/adapter-pg`, anything else

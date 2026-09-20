@@ -7,15 +7,20 @@
 # are the secrets and the network — which is the point of running it.
 services:
   db:
+    # The role and database below were renamed with the brand. Postgres only runs
+    # its init on an empty data directory, so an existing `pgdata` volume still
+    # holds the old role and the app will fail with `role "venturelly" does not
+    # exist`. One-time fix: `docker compose down -v`, which discards local test
+    # data and nothing else.
     image: postgres:17-alpine
     environment:
       POSTGRES_PASSWORD: devpass
-      POSTGRES_USER: venturally
-      POSTGRES_DB: venturally
+      POSTGRES_USER: venturelly
+      POSTGRES_DB: venturelly
     ports: ["55432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U venturally"]
+      test: ["CMD-SHELL", "pg_isready -U venturelly"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -29,7 +34,7 @@ services:
       db: { condition: service_healthy }
     ports: ["3000:3000"]
     environment:
-      DATABASE_URL: postgresql://venturally:devpass@db:5432/venturally
+      DATABASE_URL: postgresql://venturelly:devpass@db:5432/venturelly
       NEXT_PUBLIC_SITE_URL: http://localhost:3000
       BETTER_AUTH_URL: http://localhost:3000
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-development-secret-change-me}

@@ -9,13 +9,13 @@ import { siteUrl } from "./env";
  * to a search engine.
  */
 export const brand = {
-  name: "Venturally",
-  legalName: "Venturally, Inc.",
+  name: "Venturelly",
+  legalName: "Venturelly, Inc.",
   domain: siteUrl.replace(/^https?:\/\//, ""),
   url: siteUrl,
   tagline: "The business plan your lender actually reads.",
   description:
-    "Venturally builds investor- and lender-grade business plans on a real financial model — every number computed, every claim cited, every figure reconciled to the statements.",
+    "Venturelly builds investor- and lender-grade business plans on a real financial model — every number computed, every claim cited, every figure reconciled to the statements.",
   email: {
     hello: "hello@getventurely.com",
     support: "support@getventurely.com",

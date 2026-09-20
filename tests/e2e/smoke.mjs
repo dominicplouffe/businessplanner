@@ -156,7 +156,7 @@ try {
     });
     return { status: response.status, body: await response.json().catch(() => ({})) };
   };
-  const devHeaders = { "x-venturally-dev-webhook": "1" };
+  const devHeaders = { "x-venturelly-dev-webhook": "1" };
 
   const replayId = `evt_e2e_replay_${Date.now()}`;
   const first = await postWebhook(synthetic(replayId, member.workspaceId, plan.id), devHeaders);

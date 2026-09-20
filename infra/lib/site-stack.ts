@@ -20,7 +20,7 @@ import {
 import { Construct } from "constructs";
 
 /* ==========================================================================
-   Venturally, on AWS.
+   Venturelly, on AWS.
    --------------------------------------------------------------------------
    The original plan here was S3 and CloudFront serving a static export. That
    is no longer what this application is: it has authentication, a database,
@@ -82,9 +82,9 @@ export class SiteStack extends Stack {
     /* ---- Database ------------------------------------------------------ */
 
     const dbSecret = new secretsmanager.Secret(this, "DbSecret", {
-      description: "Venturally Postgres credentials",
+      description: "Venturelly Postgres credentials",
       generateSecretString: {
-        secretStringTemplate: JSON.stringify({ username: "venturally" }),
+        secretStringTemplate: JSON.stringify({ username: "venturelly" }),
         generateStringKey: "password",
         // Postgres URLs are parsed before they are connected with, so a
         // password containing a delimiter produces a connection string that is
@@ -104,7 +104,7 @@ export class SiteStack extends Stack {
         ? ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.SMALL)
         : ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.MICRO),
       credentials: rds.Credentials.fromSecret(dbSecret),
-      databaseName: "venturally",
+      databaseName: "venturelly",
       allocatedStorage: 20,
       maxAllocatedStorage: 200,
       multiAz: isProduction,
@@ -132,7 +132,7 @@ export class SiteStack extends Stack {
     /* ---- Image --------------------------------------------------------- */
 
     const repository = new ecr.Repository(this, "Repository", {
-      repositoryName: "venturally",
+      repositoryName: "venturelly",
       imageScanOnPush: true,
       lifecycleRules: [
         { description: "Keep the last 20 images", maxImageCount: 20 },
@@ -156,7 +156,7 @@ export class SiteStack extends Stack {
     const container = taskDefinition.addContainer("app", {
       image: ecs.ContainerImage.fromEcrRepository(repository, props.imageTag),
       logging: ecs.LogDrivers.awsLogs({
-        streamPrefix: "venturally",
+        streamPrefix: "venturelly",
         logRetention: logs.RetentionDays.ONE_MONTH,
       }),
       environment: {

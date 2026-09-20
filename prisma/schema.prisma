@@ -1,4 +1,4 @@
-// Venturally data model.
+// Venturelly data model.
 //
 // PORTABILITY: every model here is deliberately written to run unchanged on
 // SQLite (local development and tests) and PostgreSQL (production):

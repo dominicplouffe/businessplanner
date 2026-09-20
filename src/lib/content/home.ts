@@ -5,7 +5,7 @@ export const differentiators = [
     key: "underwriter",
     eyebrow: "Underwriter math",
     title: "The ratios a credit analyst computes, computed first",
-    body: "Founders submit plans; banks compute ratios. Venturally renders the lender's own arithmetic — debt service coverage, the amortisation schedule, coverage against the threshold in force, working-capital cycle — and tells you where you stand before an underwriter works it out for you.",
+    body: "Founders submit plans; banks compute ratios. Venturelly renders the lender's own arithmetic — debt service coverage, the amortisation schedule, coverage against the threshold in force, working-capital cycle — and tells you where you stand before an underwriter works it out for you.",
     proof: "DSCR, coverage, current ratio, debt-to-equity, owner compensation by year.",
   },
   {
@@ -64,7 +64,7 @@ export const faqItems = [
   },
   {
     q: "Do you support immigration business plans?",
-    a: "Yes — E-2, L-1A and EB-5 document structures, with the fields those tests actually turn on: owner compensation as a named line, household size for the marginality assessment, and a cost-of-enterprise denominator for proportionality. Venturally is a document-preparation tool, not a law firm: every immigration plan should be reviewed by licensed counsel before filing.",
+    a: "Yes — E-2, L-1A and EB-5 document structures, with the fields those tests actually turn on: owner compensation as a named line, household size for the marginality assessment, and a cost-of-enterprise denominator for proportionality. Venturelly is a document-preparation tool, not a law firm: every immigration plan should be reviewed by licensed counsel before filing.",
   },
   {
     q: "What does it cost, and can I see it before I pay?",

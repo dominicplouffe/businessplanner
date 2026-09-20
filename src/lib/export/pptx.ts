@@ -22,7 +22,7 @@ const BRASS = "A8852C";
 
 export async function buildDeck(doc: ExportDocument): Promise<Buffer> {
   const pptx = new PptxGenJS();
-  pptx.author = "Venturally";
+  pptx.author = "Venturelly";
   pptx.company = doc.companyName;
   pptx.title = `${doc.companyName} — investor deck`;
   pptx.layout = "LAYOUT_16x9";

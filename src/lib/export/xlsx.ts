@@ -37,7 +37,7 @@ type Ref = string;
 
 export async function buildWorkbook(doc: ExportDocument): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Venturally";
+  wb.creator = "Venturelly";
   wb.created = new Date();
 
   const months = doc.model.horizonMonths;

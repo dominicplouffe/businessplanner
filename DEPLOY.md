@@ -1,4 +1,4 @@
-# Deploying Venturally
+# Deploying Venturelly
 
 Everything in this repository is ready to deploy. What follows is the part that
 needs a human with AWS access, because it needs credentials and a domain.
@@ -30,14 +30,14 @@ reopen it.
 
 Two things follow from it that are worth knowing:
 
-The brand word is **Venturally** and the domain is **getventurely.com** — they
-are not the same string. Everything user-visible reads from `src/lib/brand.ts`,
-and the origin from `NEXT_PUBLIC_SITE_URL` (falling back to the production
-domain in `src/lib/env.ts`), so the two never have to agree in code — but a
-person typing one from memory of the other will land nowhere. Registering the
-two obvious misspellings — `getventuraly` and `getventurally`, both `.com` — as
-redirects to the apex costs about $24 a year and is worth more than that in
-traffic that would otherwise bounce.
+The brand word is **Venturelly** and the domain is **getventurely.com** — one
+`l` apart, which is as close as they can be without being identical. Everything
+user-visible reads from `src/lib/brand.ts` and the origin from
+`NEXT_PUBLIC_SITE_URL` (falling back to the production domain in
+`src/lib/env.ts`), so neither is written twice. Registering the near misses —
+`getventurally`, `getventuraly`, `getventurelly`, all `.com` — as redirects to
+the apex costs about $36 a year and is worth more than that in traffic that would
+otherwise bounce.
 
 To confirm nothing has drifted:
 
@@ -72,7 +72,7 @@ cd infra
 export AWS_REGION=us-east-1
 export CDK_DEFAULT_ACCOUNT=<ACCOUNT_ID>
 
-npx cdk deploy VenturallyCertificate VenturallySite \
+npx cdk deploy VenturellyCertificate VenturellySite \
   --context domainName=getventurely.com \
   --context imageTag=bootstrap
 ```
@@ -117,11 +117,11 @@ aws ecr get-login-password --region us-east-1 \
 
 docker build \
   --build-arg NEXT_PUBLIC_SITE_URL=https://getventurely.com \
-  -t <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/venturally:first .
+  -t <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/venturelly:first .
 
-docker push <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/venturally:first
+docker push <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/venturelly:first
 
-cd infra && npx cdk deploy VenturallySite \
+cd infra && npx cdk deploy VenturellySite \
   --context domainName=getventurely.com --context imageTag=first
 ```
 
@@ -193,9 +193,26 @@ CDK bootstrap roles (`cdk-*-deploy-role-*`, `cdk-*-file-publishing-role-*`).
 Then add the role ARN as the `AWS_DEPLOY_ROLE_ARN` repository secret, and create
 a `production` environment in GitHub if you want a manual approval gate.
 
-### The workflows
+### The workflows — one rename still owed
 
-Both live in `.github/workflows/` and run as committed. Nothing to do here.
+Both live in `.github/workflows/` and run as committed, but `deploy.yml` still
+spells the ECR repository and the two stack names the pre-rename way. The CDK app
+now creates them as `venturelly` / `VenturellySite` / `VenturellyCertificate`, so
+a deploy would push to a repository that does not exist and then create a second
+pair of stacks. An agent session cannot fix it — GitHub refuses a push that writes
+under `.github/workflows/` without the `workflow` scope — so it needs one command
+from a clone:
+
+<!-- spelling-exempt: the command below has to name the old spelling to replace it -->
+```bash
+# GNU sed; on macOS use: sed -i ''
+sed -i 's/ventur[a]lly/venturelly/g; s/Ventur[a]lly/Venturelly/g' .github/workflows/deploy.yml
+git commit -am "Rename the image and stacks in the deploy workflow" && git push
+```
+
+The character class is only there so this file passes its own spelling check;
+`ventur[a]lly` matches the same text the plain word would. `tests/site.test.ts`
+exempts the two workflow files from the brand check, and only from that one.
 
 They could not be put there from an agent session — GitHub refuses a push that
 writes under `.github/workflows/` unless the credential carries the `workflow`
