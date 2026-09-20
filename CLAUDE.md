@@ -57,6 +57,16 @@ the choice is explicit at every row.
 not `Math.max(0, …)`. A clamp there silently absorbs exactly the class of bug the
 balance-sheet tie exists to catch.
 
+**A benchmark band declares its own cost basis.** The engine carries direct
+labour in cost of sales, but the published figures disagree with each other about
+that: a restaurant's gross margin is quoted on food cost alone, a cleaning
+contractor's after the cleaners' wages, because the wages *are* the cost of the
+service. `grossMarginBasis` on each `IndustryBenchmark` says which, and
+`validate.ts` reads `materialsMarginByYear` or `grossMarginByYear` to match.
+Comparing the wrong pair is wrong in both directions — it reported a margin
+shortfall on every hospitality plan (the intake flags service staff as direct by
+default) and extraordinary profit on every labour business.
+
 **Benchmarks warn, they never overwrite.** Substituting an industry median
 destroys the specificity that makes a plan credible. Flag the out-of-band value
 with its source and let the author justify it.

@@ -3,7 +3,8 @@ import { buildModel } from "@/lib/finance/engine";
 import { computeMetrics } from "@/lib/finance/metrics";
 import { validateModel } from "@/lib/finance/validate";
 import { AssumptionsSchema, type AssumptionsInput } from "@/lib/finance/types";
-import { saasPlan } from "./fixtures";
+import { getBenchmark } from "@/lib/finance/benchmarks";
+import { restaurantPlan, saasPlan } from "./fixtures";
 
 const run = (plan: AssumptionsInput, ctx = {}) => {
   const model = buildModel(plan);
@@ -205,5 +206,43 @@ describe("AssumptionsSchema — immigration-relevant fields", () => {
     expect(a.enterpriseEstablishmentCost).toBe(850_000);
     // The five-year clock runs from the start of normal business activity.
     expect(a.company.firstTradingMonth).toBe(1);
+  });
+});
+
+describe("benchmark gross margin — the basis of the comparison", () => {
+  /* The engine carries direct labour in cost of sales; the published bands are
+     quoted before it. Comparing the statements' own gross margin against a band
+     reported a shortfall on every plan that flags its service staff as direct —
+     which the intake does by default — so the comparison runs on the
+     materials-only figure. */
+  it("compares the materials-only margin, not the labour-inclusive one", () => {
+    const model = buildModel(restaurantPlan);
+    const metrics = computeMetrics(model);
+    const year1 = metrics.materialsMarginByYear.find((y) => y.year === 1)!;
+    const reported = metrics.grossMarginByYear.find((y) => y.year === 1)!;
+
+    // Kitchen staff are direct, so the two figures must differ.
+    expect(year1.margin!).toBeGreaterThan(reported.margin!);
+
+    const finding = run(restaurantPlan, cleanContext).findings.find((f) =>
+      f.id.startsWith("gross-margin-out-of-band"),
+    );
+    const band = getBenchmark(restaurantPlan.company.industryKey).grossMargin;
+    const inBand = year1.margin! >= band.low && year1.margin! <= band.high;
+    expect(Boolean(finding), `materials margin ${year1.margin}`).toBe(!inBand);
+  });
+
+  it("does not raise the band finding when only direct labour pushes the margin down", () => {
+    // Same plan, kitchen staff reclassified as overhead. The materials margin —
+    // and so the band finding — must be identical either way.
+    const asOverhead: AssumptionsInput = {
+      ...restaurantPlan,
+      roles: restaurantPlan.roles!.map((r) => ({ ...r, isDirectLabour: false })),
+    };
+    const direct = run(restaurantPlan, cleanContext);
+    const overhead = run(asOverhead, cleanContext);
+    const bandIds = (r: ReturnType<typeof run>) =>
+      ids(r).filter((id) => id.startsWith("gross-margin-out-of-band"));
+    expect(bandIds(direct)).toEqual(bandIds(overhead));
   });
 });

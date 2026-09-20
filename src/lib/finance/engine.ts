@@ -23,6 +23,14 @@ export type ProfitAndLoss = {
   revenue: MonthlyLine;
   revenueByStream: { id: string; name: string; values: MonthlyLine }[];
   cogs: MonthlyLine;
+  /** Cost of sales before direct labour — materials, goods and stream costs.
+   *  Industry gross-margin bands are quoted on this basis (a restaurant's
+   *  "food cost", a retailer's "cost of goods"), so comparing a labour-inclusive
+   *  margin against them reports a false warning on every plan that flags its
+   *  service staff as direct labour. */
+  materialsCogs: MonthlyLine;
+  /** Gross profit before direct labour, for benchmark comparison only. */
+  materialsGrossProfit: MonthlyLine;
   grossProfit: MonthlyLine;
   opexByCategory: { category: OpexCategory; values: MonthlyLine }[];
   totalOpex: MonthlyLine;
@@ -168,7 +176,16 @@ export function buildModel(input: AssumptionsInput | Assumptions): FinancialMode
   }
 
   const cogs = zeros(n);
-  for (let i = 0; i < n; i++) cogs[i] = at(streamCogs, i) + at(directLabour, i);
+  // Materials-only cost of sales is kept alongside the full figure: the
+  // statements need labour in cost of sales, and the benchmark comparison
+  // needs it out, because the published bands are quoted without it.
+  const materialsCogs = zeros(n);
+  const materialsGrossProfit = zeros(n);
+  for (let i = 0; i < n; i++) {
+    cogs[i] = at(streamCogs, i) + at(directLabour, i);
+    materialsCogs[i] = at(streamCogs, i);
+    materialsGrossProfit[i] = at(revenue, i) - at(streamCogs, i);
+  }
 
   /* ---- Operating expenses ---------------------------------------------- */
   const categories = new Map<OpexCategory, number[]>();
@@ -391,6 +408,8 @@ export function buildModel(input: AssumptionsInput | Assumptions): FinancialMode
       revenue,
       revenueByStream: streams.map((s) => ({ id: s.id, name: s.name, values: s.revenue })),
       cogs,
+      materialsCogs,
+      materialsGrossProfit,
       grossProfit,
       opexByCategory,
       totalOpex,

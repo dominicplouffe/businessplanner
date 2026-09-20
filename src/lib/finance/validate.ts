@@ -270,7 +270,20 @@ export function validateModel(
   const benchmark = getBenchmark(a.company.industryKey);
 
   // Margins against the industry band, for years that actually trade.
-  for (const y of metrics.grossMarginByYear) {
+  //
+  // Which gross margin gets compared depends on how the band was quoted, which
+  // the benchmark declares. A restaurant's band is food cost only, so the
+  // labour-inclusive figure the statements show is below it by construction and
+  // reported a false shortfall on every plan flagging its service staff as
+  // direct — which the intake does by default. A cleaning contractor's band is
+  // quoted after the cleaners' wages, so the materials figure would read as
+  // extraordinary profit. Same finding, opposite errors.
+  const materialsBasis = benchmark.grossMarginBasis === "materials";
+  const comparable = materialsBasis ? metrics.materialsMarginByYear : metrics.grossMarginByYear;
+  const basisNote = materialsBasis
+    ? " The band is quoted before direct labour, so this is the comparable figure."
+    : "";
+  for (const y of comparable) {
     if (y.margin === null || y.year > 3) continue;
     const off = isOutOfBand(y.margin, benchmark.grossMargin);
     if (off) {
@@ -278,9 +291,11 @@ export function validateModel(
         id: `gross-margin-out-of-band-y${y.year}`,
         severity: "warning",
         title: `Year ${y.year} gross margin is ${off === "high" ? "above" : "below"} the industry band`,
-        detail: `${pct(y.margin)} against a ${benchmark.label} band of ${pct(
-          benchmark.grossMargin.low,
-        )}–${pct(benchmark.grossMargin.high)} (median ${pct(benchmark.grossMargin.median)}). Source: ${
+        detail: `${pct(y.margin)}${
+          materialsBasis ? " before direct labour" : ""
+        } against a ${benchmark.label} band of ${pct(benchmark.grossMargin.low)}–${pct(
+          benchmark.grossMargin.high,
+        )} (median ${pct(benchmark.grossMargin.median)}).${basisNote} Source: ${
           benchmark.sourceLabel
         }, ${benchmark.vintage}.`,
         remedy: "Justify the difference in the narrative, or revisit pricing and direct costs. The benchmark is a prompt, not a correction.",

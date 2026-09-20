@@ -71,6 +71,9 @@ export type Metrics = {
   /** Revenue growth year over year. */
   revenueGrowthByYear: { year: number; growth: number | null }[];
   grossMarginByYear: { year: number; margin: number | null }[];
+  /** Gross margin before direct labour. This is the one to compare against an
+   *  industry band; grossMarginByYear is the one to report. */
+  materialsMarginByYear: { year: number; margin: number | null }[];
   netMarginByYear: { year: number; margin: number | null }[];
 };
 
@@ -79,6 +82,11 @@ function at(arr: number[], i: number): number {
 }
 function mean(values: number[]): number {
   return values.length === 0 ? 0 : values.reduce((s, v) => s + v, 0) / values.length;
+}
+function sumRange(arr: number[], from: number, count: number): number {
+  let total = 0;
+  for (let i = from; i < from + count; i++) total += at(arr, i);
+  return total;
 }
 
 export function computeMetrics(model: FinancialModel): Metrics {
@@ -216,6 +224,17 @@ export function computeMetrics(model: FinancialModel): Metrics {
     };
   });
 
+  // Materials-only margin is derived from the monthly lines rather than added to
+  // AnnualSummary: it exists for the benchmark comparison, and a second gross
+  // margin on the annual rollup would find its way into the statements.
+  const materialsMarginByYear = annual.map((y) => {
+    const from = (y.year - 1) * 12;
+    const count = Math.min(12, n - from);
+    const yearRevenue = sumRange(pnl.revenue, from, count);
+    const yearGross = sumRange(pnl.materialsGrossProfit, from, count);
+    return { year: y.year, margin: yearRevenue > 0 ? yearGross / yearRevenue : null };
+  });
+
   return {
     breakEven: {
       profitMonth,
@@ -256,6 +275,7 @@ export function computeMetrics(model: FinancialModel): Metrics {
       year: y.year,
       margin: y.revenue > 0 ? y.grossProfit / y.revenue : null,
     })),
+    materialsMarginByYear,
     netMarginByYear: annual.map((y) => ({
       year: y.year,
       margin: y.revenue > 0 ? y.netIncome / y.revenue : null,
