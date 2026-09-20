@@ -1,6 +1,7 @@
 import type { Finding, ValidationResult } from "@/lib/finance/validate";
 import type { ConsistencyReport } from "@/lib/ai/consistency";
 import { formatCurrency, formatMultiple, formatPercent } from "@/lib/finance/format";
+import { INTAKE_STEPS } from "@/lib/content/intake";
 
 /* ==========================================================================
    The fix-it queue.
@@ -24,22 +25,80 @@ export type QueueItem = {
   remedy: string;
   /** Where in the product this gets fixed. */
   href?: string;
+  /** What that screen is, so the link says where it goes. */
+  hrefLabel?: string;
 };
 
 /** The aggregate the queue expands, so it is not also listed as an item. */
 const ROLLUP_IDS = new Set(["narrative-model-mismatch"]);
 
-function hrefForFinding(planId: string, finding: Finding): string | undefined {
+/* --------------------------------------------------------------------------
+   Where a finding actually gets fixed.
+
+   This used to send everything financial to /financials, which reports the
+   numbers and cannot change them — the reader arrived at a page that restated
+   the problem and offered no control. Almost every financial finding is an
+   *assumption* problem, and intake is the only write path into assumptions, so
+   the destination is the intake step that owns the driver.
+
+   The step keys are the ones in INTAKE_STEPS; `intakeStepIndex` resolves them
+   so a renamed or reordered step cannot silently produce a link to nowhere.
+   -------------------------------------------------------------------------- */
+
+type Destination = { href: string; hrefLabel: string };
+
+/** anchor prefix → the intake step that owns those drivers, longest first. */
+const ANCHOR_TO_STEP: [prefix: string, step: string, label: string][] = [
+  ["/financials/payroll", "team", "Edit the team and pay"],
+  ["/financials/revenue", "revenue", "Edit the revenue drivers"],
+  ["/financials/expenses", "costs", "Edit the cost assumptions"],
+  ["/financials/unit-economics", "costs", "Edit the cost assumptions"],
+  ["/financials/debt", "funding", "Edit the funding and debt"],
+  ["/financials/funding", "funding", "Edit the funding and debt"],
+  ["/intake/revenue", "revenue", "Edit the revenue drivers"],
+];
+
+export function intakeStepIndex(stepKey: string): number {
+  const index = INTAKE_STEPS.findIndex((s) => s.key === stepKey);
+  // A key that no longer exists lands on the first step rather than a blank
+  // wizard — wrong, but recoverable, and the test below stops it happening.
+  return index === -1 ? 0 : index;
+}
+
+function destinationFor(planId: string, finding: Finding): Destination | undefined {
   const anchor = finding.anchor;
   if (!anchor) return undefined;
-  if (anchor.startsWith("/financials")) return `/plans/${planId}/financials`;
+
+  for (const [prefix, step, label] of ANCHOR_TO_STEP) {
+    if (anchor.startsWith(prefix)) {
+      return { href: `/plans/${planId}/intake?step=${intakeStepIndex(step)}`, hrefLabel: label };
+    }
+  }
+
+  // The scenario rules are about the shape of the downside case, which is
+  // computed rather than answered — the financials page is the right screen.
+  if (anchor.startsWith("/financials/scenarios")) {
+    return { href: `/plans/${planId}/financials`, hrefLabel: "Open the scenarios" };
+  }
+
+  // Anything else financial is a whole-model figure — margin against a band,
+  // break-even, cash. The lever is pricing and cost, so: costs.
+  if (anchor.startsWith("/financials")) {
+    return {
+      href: `/plans/${planId}/intake?step=${intakeStepIndex("costs")}`,
+      hrefLabel: "Edit the assumptions",
+    };
+  }
+
   if (anchor.startsWith("/market") || anchor.startsWith("/competition")) {
-    return `/plans/${planId}/sections/market`;
+    return { href: `/plans/${planId}/sections/market`, hrefLabel: "Open the market section" };
   }
+
   if (anchor.startsWith("/intake") || anchor.startsWith("/assumptions")) {
-    return `/plans/${planId}/intake`;
+    return { href: `/plans/${planId}/intake`, hrefLabel: "Open intake" };
   }
-  return `/plans/${planId}${anchor}`;
+
+  return { href: `/plans/${planId}${anchor}`, hrefLabel: "Go to it" };
 }
 
 function describeFigure(value: number, kind: string, currency: string): string {
@@ -74,7 +133,7 @@ export function buildFixQueue(
       title: finding.title,
       detail: finding.detail,
       remedy: finding.remedy,
-      ...(hrefForFinding(planId, finding) ? { href: hrefForFinding(planId, finding)! } : {}),
+      ...destinationFor(planId, finding),
     });
   }
 
@@ -90,6 +149,7 @@ export function buildFixQueue(
         ? `The closest computed value is ${describeFigure(nearest.value, figure.kind, currency)} — ${nearest.label}. Either use it, or change the assumption so the model produces the figure you meant.`
         : "Nothing the engine computed is close to this. Either the figure belongs to a source that should be cited, or it needs removing.",
       href: `/plans/${planId}/sections/${sectionKey}`,
+      hrefLabel: `Open ${sectionTitle.toLowerCase()}`,
     });
   });
 

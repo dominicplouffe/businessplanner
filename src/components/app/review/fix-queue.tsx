@@ -111,7 +111,7 @@ function Group({
                   href={item.href}
                   className="mt-2.5 inline-flex items-center gap-1.5 text-sm text-emerald-700 underline-offset-4 hover:underline dark:text-emerald-500"
                 >
-                  Go and fix it
+                  {item.hrefLabel ?? "Go and fix it"}
                   <ArrowRight aria-hidden className="size-3.5" />
                 </Link>
               ) : null}

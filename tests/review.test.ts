@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { scorePlan, type PlanPurpose, type ReviewInput } from "@/lib/review/rubric";
-import { buildFixQueue } from "@/lib/review/queue";
+import { buildFixQueue, intakeStepIndex } from "@/lib/review/queue";
+import { INTAKE_STEPS } from "@/lib/content/intake";
 import { buildModel } from "@/lib/finance/engine";
 import { computeMetrics } from "@/lib/finance/metrics";
-import { validateModel } from "@/lib/finance/validate";
+import { validateModel, type ValidationResult } from "@/lib/finance/validate";
 import { AssumptionsSchema } from "@/lib/finance/types";
 import { buildModelIndex, checkPlan } from "@/lib/ai/consistency";
 import { buildValidationContext } from "@/lib/review/context";
@@ -207,6 +208,78 @@ describe("buildFixQueue", () => {
     const queue = buildFixQueue("p1", validation, consistency, "USD");
     const item = queue.find((q) => q.source === "consistency")!;
     expect(item.remedy).toMatch(/closest computed value/);
+  });
+
+  /* Every link has to land on a control that can change the thing it names.
+     The queue used to send every financial finding to /financials, which reports
+     the numbers and cannot edit them, so "Go and fix it" opened a page with
+     nothing to fix it with. Intake is the only write path into assumptions. */
+  it("sends assumption findings to the intake step that owns the driver", () => {
+    const validation: ValidationResult = {
+      canExport: false,
+      findings: [
+        {
+          id: "growth-unsupported-y2",
+          severity: "warning",
+          title: "Year 2 revenue grows 531.4%",
+          detail: "…",
+          remedy: "…",
+          anchor: "/financials/revenue",
+        },
+        {
+          id: "net-margin-optimistic-y2",
+          severity: "warning",
+          title: "Year 2 net margin is above the industry band",
+          detail: "…",
+          remedy: "…",
+          anchor: "/financials",
+        },
+        {
+          id: "owner-compensation-missing",
+          severity: "blocking",
+          title: "No owner compensation",
+          detail: "…",
+          remedy: "…",
+          anchor: "/financials/payroll",
+        },
+      ],
+      blockingCount: 1,
+      warningCount: 2,
+    };
+
+    const queue = buildFixQueue("p1", validation, checkPlan([], index), "USD");
+    const byId = Object.fromEntries(queue.map((q) => [q.id, q]));
+
+    expect(byId["growth-unsupported-y2"]!.href).toBe(
+      `/plans/p1/intake?step=${intakeStepIndex("revenue")}`,
+    );
+    expect(byId["net-margin-optimistic-y2"]!.href).toBe(
+      `/plans/p1/intake?step=${intakeStepIndex("costs")}`,
+    );
+    expect(byId["owner-compensation-missing"]!.href).toBe(
+      `/plans/p1/intake?step=${intakeStepIndex("team")}`,
+    );
+
+    // None of them may point at the read-only workspace.
+    for (const item of queue) {
+      expect(item.href).not.toBe("/plans/p1/financials");
+    }
+  });
+
+  it("names the destination, so the link is not a mystery door", () => {
+    const validation = validateModel(model, metrics, { purpose: "sba-loan" });
+    const queue = buildFixQueue("p1", validation, checkPlan([], index), "USD");
+    for (const item of queue) {
+      if (item.href) expect(item.hrefLabel, item.id).toBeTruthy();
+    }
+  });
+
+  it("only links to intake steps that exist", () => {
+    // intakeStepIndex falls back to 0 for an unknown key, which would be a link
+    // to the wrong screen rather than a crash — so assert the keys directly.
+    for (const key of ["business", "revenue", "costs", "team", "funding"]) {
+      expect(INTAKE_STEPS.map((s) => s.key), key).toContain(key);
+    }
   });
 
   it("does not also list the roll-up the queue exists to expand", () => {
