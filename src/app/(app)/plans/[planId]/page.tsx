@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowRight, CheckCircle2, Pencil } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, LineChart, Pencil } from "lucide-react";
 import { AppPageHeader } from "@/components/app/page-header";
 import { ButtonLink } from "@/components/ui/button";
 import { requireUser, getOrCreateWorkspace } from "@/lib/session";
@@ -11,6 +11,7 @@ import { computeMetrics } from "@/lib/finance/metrics";
 import { validateModel } from "@/lib/finance/validate";
 import { formatCurrency, formatMultiple, formatPercent } from "@/lib/finance/format";
 import { getBenchmark } from "@/lib/finance/benchmarks";
+import { sbaProgrammeForLoan } from "@/lib/content/regulatory";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Plan" };
@@ -46,8 +47,15 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
 
   const model = buildModel(assumptions);
   const metrics = computeMetrics(model);
+  // The programme decides which coverage threshold applies, so it is derived
+  // from the request size here exactly as the financials page derives it —
+  // two pages disagreeing about the DSCR verdict would be a bug.
+  const { programme } = sbaProgrammeForLoan(
+    assumptions.loans.reduce((sum, loan) => sum + loan.principal, 0) + assumptions.opening.debt,
+  );
   const validation = validateModel(model, metrics, {
     purpose: plan.purpose as "sba-loan" | "investor" | "immigration" | "internal",
+    sbaProgramme: programme,
   });
 
   const writtenCount = plan.sections.filter((s) => s.contentText.trim().length > 0).length;
@@ -68,10 +76,16 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
             : `${writtenCount} of ${PLAN_SECTIONS.length} sections written.`
         }
         actions={
-          <ButtonLink href={`/plans/${plan.id}/intake`} variant="secondary">
-            <Pencil aria-hidden className="size-4" />
-            Edit answers
-          </ButtonLink>
+          <>
+            <ButtonLink href={`/plans/${plan.id}/financials`} variant="secondary">
+              <LineChart aria-hidden className="size-4" />
+              Financials
+            </ButtonLink>
+            <ButtonLink href={`/plans/${plan.id}/intake`} variant="secondary">
+              <Pencil aria-hidden className="size-4" />
+              Edit answers
+            </ButtonLink>
+          </>
         }
       />
 
@@ -99,6 +113,13 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
             Balance sheet ties in all {model.horizonMonths} periods
             <span aria-hidden className="mx-2">·</span>
             {model.annual.length}-year model
+            <span aria-hidden className="mx-2">·</span>
+            <Link
+              href={`/plans/${plan.id}/financials`}
+              className="underline-offset-4 hover:text-secondary hover:underline"
+            >
+              Open the statements, coverage ratios and scenarios
+            </Link>
           </p>
         </section>
 

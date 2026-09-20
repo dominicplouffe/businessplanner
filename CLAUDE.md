@@ -46,6 +46,13 @@ schedule once made principal repayments differ from the amount drawn, which brok
 the balance sheet. `roundScheduleForDisplay()` exists for presentation; the model
 stays at full precision.
 
+**Flows sum, stocks close.** `src/lib/finance/statements.ts` shapes engine
+output into table rows, and the annual view of a *flow* (revenue, interest) is
+the year's sum while a *stock* (cash, debt, any balance-sheet line) is the
+closing month's value. Summing a stock like a flow overstates it about twelvefold
+and still ties, so nothing downstream catches it. `flow()` and `stock()` exist so
+the choice is explicit at every row.
+
 **Never clamp a balance to hide an inconsistency.** `debtBalance` is deliberately
 not `Math.max(0, …)`. A clamp there silently absorbs exactly the class of bug the
 balance-sheet tie exists to catch.

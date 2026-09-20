@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FileText, LayoutDashboard, Plus } from "lucide-react";
+import { FileText, LayoutDashboard, LineChart, Plus } from "lucide-react";
 import { Logo } from "@/components/marketing/logo";
 import { UserMenu } from "./user-menu";
 import { ButtonLink } from "@/components/ui/button";
@@ -43,17 +43,36 @@ export function AppSidebar({
           <div className="mt-6">
             <p className="px-2.5 text-eyebrow font-medium uppercase text-tertiary">Plans</p>
             <ul className="mt-2 space-y-0.5">
-              {plans.map((plan) => (
-                <li key={plan.id}>
-                  <NavItem
-                    href={`/plans/${plan.id}`}
-                    icon={<FileText aria-hidden className="size-4" />}
-                    active={pathname.startsWith(`/plans/${plan.id}`)}
-                  >
-                    {plan.title}
-                  </NavItem>
-                </li>
-              ))}
+              {plans.map((plan) => {
+                const open = pathname.startsWith(`/plans/${plan.id}`);
+                return (
+                  <li key={plan.id}>
+                    <NavItem
+                      href={`/plans/${plan.id}`}
+                      icon={<FileText aria-hidden className="size-4" />}
+                      active={pathname === `/plans/${plan.id}`}
+                    >
+                      {plan.title}
+                    </NavItem>
+
+                    {/* The workspace only appears under the plan you are in,
+                        so the rail stays short with a dozen plans in it. */}
+                    {open ? (
+                      <ul className="mt-0.5 ml-4 space-y-0.5 border-l border-hairline pl-2">
+                        <li>
+                          <NavItem
+                            href={`/plans/${plan.id}/financials`}
+                            icon={<LineChart aria-hidden className="size-4" />}
+                            active={pathname === `/plans/${plan.id}/financials`}
+                          >
+                            Financials
+                          </NavItem>
+                        </li>
+                      </ul>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ) : null}

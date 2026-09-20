@@ -87,6 +87,19 @@ export const DSCR_THRESHOLDS: Record<SbaProgramme, DatedValue<number>[]> = {
   ],
 };
 
+/** The 7(a) Small Loan ceiling. Above it a request is underwritten as a
+ *  standard 7(a), which carries a different coverage expectation — so the
+ *  ceiling decides which threshold applies and cannot be a constant either. */
+export const SBA_SMALL_LOAN_CEILING: DatedValue<number>[] = [
+  {
+    value: 500_000,
+    effectiveFrom: "2025-06-01",
+    source: { label: "SBA SOP 50 10 8", retrieved: "2026-09-19" },
+    confidence: "unverified",
+    note: "Confirm against the SOP before presenting the programme as settled.",
+  },
+];
+
 /** Minimum equity injection lenders look for on a startup or acquisition. */
 export const EQUITY_INJECTION_MINIMUM: DatedValue<number>[] = [
   {
@@ -192,6 +205,7 @@ export const CONFIG_VINTAGE = {
   verificationQueue: [
     "SBA SOP DSCR thresholds and the 2026-10-01 SOP 50 10 8.1 change",
     "SBA guaranty fee schedule (fiscal-year dependent)",
+    "7(a) Small Loan ceiling, which selects the DSCR threshold",
     "Section 179 limit and bonus depreciation percentage for 2026",
     "FICA wage base for 2026",
     "EB-5 thresholds and the 2027-01-01 inflation adjustment",
@@ -199,6 +213,19 @@ export const CONFIG_VINTAGE = {
     "9 FAM 402.9 subsection lettering (sources conflict; no pin cites until resolved)",
   ],
 } as const;
+
+/** Which 7(a) programme a request falls under, by size. Returned alongside the
+ *  dated ceiling so the UI can print which figure the decision used. */
+export function sbaProgrammeForLoan(
+  totalPrincipal: number,
+  asOf?: Date,
+): { programme: SbaProgramme; ceiling: DatedValue<number> } {
+  const ceiling = inForce(SBA_SMALL_LOAN_CEILING, asOf);
+  return {
+    programme: totalPrincipal <= ceiling.value ? "7a-small" : "7a-standard",
+    ceiling,
+  };
+}
 
 /** Convenience: the DSCR threshold in force for a programme today. */
 export function dscrThreshold(programme: SbaProgramme, asOf?: Date): DatedValue<number> {
