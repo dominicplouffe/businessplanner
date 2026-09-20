@@ -2,16 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  ClipboardCheck,
-  Cpu,
-  Download,
-  FileText,
-  LayoutDashboard,
-  LineChart,
-  Plus,
-  Target,
-} from "lucide-react";
+import { ClipboardCheck, Cpu, Download, FileText, History, LayoutDashboard, LineChart, Plus, Target } from "lucide-react";
 import { Logo } from "@/components/marketing/logo";
 import { UserMenu } from "./user-menu";
 import { ButtonLink } from "@/components/ui/button";
@@ -102,6 +93,15 @@ export function AppSidebar({
                             active={pathname === `/plans/${plan.id}/review`}
                           >
                             Review
+                          </NavItem>
+                        </li>
+                        <li>
+                          <NavItem
+                            href={`/plans/${plan.id}/versions`}
+                            icon={<History aria-hidden className="size-4" />}
+                            active={pathname === `/plans/${plan.id}/versions`}
+                          >
+                            History
                           </NavItem>
                         </li>
                         <li>

@@ -10,16 +10,23 @@ import { buildDocx } from "@/lib/export/docx";
 import { buildDeck } from "@/lib/export/pptx";
 import { renderPdf } from "@/lib/export/pdf";
 import { generatorKind } from "@/lib/ai";
+import { getEntitlements } from "@/lib/billing";
 
 /* ==========================================================================
    Export.
    --------------------------------------------------------------------------
-   Gated on the review, deliberately. The product's claim is that what leaves
-   here survives scrutiny, and a file that ships with the balance sheet broken
-   or a figure in the prose that the model never produced would make that claim
-   false the first time anyone checked. So the gate is the same validator the
-   review page shows, and the response says exactly what is blocking rather
-   than refusing flatly.
+   Two gates, reported separately and never merged.
+
+   The review gate is about the document: the product's claim is that what
+   leaves here survives scrutiny, so a file with the balance sheet broken or a
+   figure the model never produced cannot be downloaded. It answers 409 with
+   the blocking findings.
+
+   The entitlement gate is about payment, and answers 402. Collapsing the two
+   into one refusal is how a product tells somebody who has just paid that
+   their export failed for an unrelated reason — so the entitlement is checked
+   first and named plainly, and the review findings are only returned when the
+   plan is actually paid for.
    ========================================================================== */
 
 export const dynamic = "force-dynamic";
@@ -60,6 +67,14 @@ export async function GET(
     return NextResponse.json(
       { error: "Finish the intake first — there is no model to export." },
       { status: 409 },
+    );
+  }
+
+  const entitlements = await getEntitlements({ workspaceId: workspace.id, plan });
+  if (!entitlements.canExport) {
+    return NextResponse.json(
+      { error: entitlements.blockedReason, needsUnlock: true, planId: plan.id },
+      { status: 402 },
     );
   }
 

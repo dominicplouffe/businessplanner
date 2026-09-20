@@ -157,6 +157,52 @@ Keep `SYSTEM_PROMPT` byte-stable — it carries the cache breakpoint, so a date 
 a reordered rule invalidates the cached prefix on every request. Per-plan content
 goes in the user message, after the breakpoint.
 
+## Billing
+
+`src/lib/billing/` has the same two-implementation shape as the AI and research
+layers, with one critical difference. `FixtureGenerator` is a first-class mode —
+composing prose from computed figures is a real thing to do. A fake payment
+provider is not: `DevBilling` grants entitlements with no money involved, so it
+**throws in its constructor** when `NODE_ENV === "production"`, and
+`/billing/simulate` 404s there rather than rendering a disabled screen.
+
+**Only the webhook grants an entitlement.** Not a page, not a server action, not
+the redirect back from checkout — a browser that can reach the success URL can
+reach it without paying. `grantUnlock()` is called from
+`/api/stripe/webhook` and nowhere else, and `Plan.unlockedAt` is written only
+there. The development checkout posts a synthetic event to that same handler, so
+the dev path exercises the real grant instead of going round it.
+
+**Idempotency is the unique index, not a check.** Stripe retries anything that is
+not answered 2xx, for days. `Purchase.stripeEventId` is unique and that
+constraint is the lock; `WebhookEvent` does the same job for every other event
+type and doubles as the audit trail for "why did my entitlement change".
+
+**An event we will never handle gets a 200.** Returning an error makes Stripe
+retry forever. A cross-workspace grant, missing metadata or an unknown type is
+recorded with its reason and answered 200. Relatedly, `learnCustomer()` swallows
+its own failures: remembering a Stripe customer is a convenience for opening the
+portal, and it must not be able to poison an event that grants something.
+
+**The two gates are never merged.** A plan can be blocked because it has not been
+paid for (402) or because it has not passed review (409). `entitlementsFor()` is
+pure and knows nothing about the validator; the export route reports whichever
+applies and names it. Collapsing them tells somebody who has just paid that their
+export failed for an unrelated reason.
+
+`entitlements.ts` treats `past_due` as live and runs a cancelled subscription to
+the end of the paid period. Cutting somebody off on the first decline is the
+behaviour this category is criticised for.
+
+## Versioning
+
+`snapshotPlan()` runs before every regeneration, when intake completes, and
+before a restore — so restoring is itself reversible. `src/lib/versions.ts`
+diffs at the **sentence** level with an LCS walk: prose regenerates wholesale, a
+word-level diff of two independently written paragraphs is confetti, and a
+positional comparison marks an insertion's neighbours as rewritten. A diff people
+do not trust is worse than no diff.
+
 ## Exports
 
 `src/lib/export/document.ts` assembles one document; `pdf.ts`, `xlsx.ts`,

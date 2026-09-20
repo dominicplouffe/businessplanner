@@ -30,7 +30,17 @@ export type ShareRow = {
   expired: boolean;
 };
 
-export function SharePanel({ planId, links }: { planId: string; links: ShareRow[] }) {
+export function SharePanel({
+  planId,
+  links,
+  unlocked,
+}: {
+  planId: string;
+  links: ShareRow[];
+  /** Creating a link is a paid action. Revoking one never is — somebody must
+   *  always be able to take a link down, whatever their billing state. */
+  unlocked: boolean;
+}) {
   const [creating, setCreating] = useState(false);
   const [label, setLabel] = useState("");
   const [expiresInDays, setExpiresInDays] = useState("30");
@@ -85,11 +95,24 @@ export function SharePanel({ planId, links }: { planId: string; links: ShareRow[
             the others.
           </p>
         </div>
-        <Button type="button" size="sm" variant="secondary" onClick={() => setCreating(true)}>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={!unlocked}
+          onClick={() => setCreating(true)}
+        >
           <Plus aria-hidden className="size-3.5" />
           New link
         </Button>
       </div>
+
+      {!unlocked ? (
+        <p className="mt-5 rounded-sm border border-hairline p-4 text-sm leading-relaxed text-secondary">
+          Share links are part of the unlock. Existing links keep working and can still
+          be revoked from here.
+        </p>
+      ) : null}
 
       {creating ? (
         <form

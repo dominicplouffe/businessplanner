@@ -11,6 +11,8 @@ import { getPlan, parseAssumptions } from "@/lib/plans";
 import { assembleReview } from "@/lib/review/assemble";
 import { getBenchmark } from "@/lib/finance/benchmarks";
 import { listShareLinks } from "@/lib/share";
+import { getEntitlements, billingIsLive } from "@/lib/billing";
+import { UnlockPanel } from "@/components/app/billing/unlock-panel";
 
 export const metadata: Metadata = { title: "Export and share" };
 
@@ -42,6 +44,10 @@ export default async function ExportPage({ params }: { params: Promise<{ planId:
 
   const { validation, readiness } = assembleReview(plan, assumptions);
 
+  // The two gates are computed and reported separately. A plan can be unpaid,
+  // unready, both or neither, and a single "locked" message that does not say
+  // which would leave the author with nothing to act on.
+  const entitlements = await getEntitlements({ workspaceId: workspace.id, plan });
   const rows = await listShareLinks(plan.id);
 
   return (
@@ -50,11 +56,13 @@ export default async function ExportPage({ params }: { params: Promise<{ planId:
         eyebrow={plan.companyName || plan.title}
         title="Export and share"
         lede={
-          validation.canExport
-            ? "Nothing is blocking. Every file below is built from the same assembled document, so none of them can contradict another."
-            : `Export is locked until ${validation.blockingCount} blocking ${
+          !validation.canExport
+            ? `Export is locked until ${validation.blockingCount} blocking ${
                 validation.blockingCount === 1 ? "finding is" : "findings are"
               } resolved. The review page lists them with what to change.`
+            : entitlements.canExport
+              ? "Nothing is blocking. Every file below is built from the same assembled document, so none of them can contradict another."
+              : "The review is clear. Unlock the plan to download the files and create share links — reading it on screen stays free."
         }
         actions={
           <>
@@ -80,8 +88,16 @@ export default async function ExportPage({ params }: { params: Promise<{ planId:
           </p>
         ) : null}
 
-        <ExportPanel planId={plan.id} canExport={validation.canExport} />
-        <SharePanel planId={plan.id} links={rows} />
+        {!entitlements.unlocked ? (
+          <UnlockPanel planId={plan.id} isDevBilling={!billingIsLive()} />
+        ) : null}
+
+        <ExportPanel
+          planId={plan.id}
+          reviewClear={validation.canExport}
+          unlocked={entitlements.unlocked}
+        />
+        <SharePanel planId={plan.id} links={rows} unlocked={entitlements.unlocked} />
 
         <p className="text-sm text-tertiary">
           <Link

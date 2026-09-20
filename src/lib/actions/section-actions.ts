@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireUser, getOrCreateWorkspace } from "@/lib/session";
 import { snapshotPlan } from "@/lib/plans";
+import { parseSnapshot } from "@/lib/versions";
 
 async function scopedPlan(planId: string) {
   const user = await requireUser();
@@ -44,19 +45,34 @@ export async function saveSectionAction(raw: z.input<typeof SaveSchema>) {
  *  the way back from an overwrite the author did not want. */
 export async function revertPlanAction(planId: string) {
   const plan = await scopedPlan(planId);
-
   const version = await db.planVersion.findFirst({
     where: { planId: plan.id },
     orderBy: { createdAt: "desc" },
   });
   if (!version) return { ok: false as const, reason: "No snapshot to restore." };
+  return restoreVersionAction({ planId, versionId: version.id });
+}
 
-  const snapshot = JSON.parse(version.snapshotJson) as {
-    sections?: { key: string; status: string; contentJson: string; contentText: string }[];
-  };
+/**
+ * Restores a named snapshot.
+ *
+ * Takes a snapshot of the current state first, so restoring is itself
+ * reversible — an undo you cannot undo is how somebody loses an afternoon's
+ * editing to a misclick, which is the exact complaint this feature answers.
+ */
+export async function restoreVersionAction(raw: { planId: string; versionId: string }) {
+  const planId = z.string().min(1).parse(raw.planId);
+  const versionId = z.string().min(1).parse(raw.versionId);
+  const plan = await scopedPlan(planId);
 
-  // Snapshot the current state first, so reverting is itself reversible.
-  await snapshotPlan(plan.id, "Before restoring a snapshot", "manual");
+  const version = await db.planVersion.findFirst({
+    where: { id: versionId, planId: plan.id },
+  });
+  if (!version) return { ok: false as const, reason: "That snapshot is not on this plan." };
+
+  const snapshot = parseSnapshot(version.snapshotJson);
+
+  await snapshotPlan(plan.id, `Before restoring “${version.label}”`, "manual");
 
   for (const section of snapshot.sections ?? []) {
     await db.planSection.updateMany({
@@ -70,7 +86,20 @@ export async function revertPlanAction(planId: string) {
   }
 
   revalidatePath(`/plans/${plan.id}`);
+  revalidatePath(`/plans/${plan.id}/versions`);
+  revalidatePath(`/plans/${plan.id}/review`);
   return { ok: true as const, label: version.label };
+}
+
+/** An explicit checkpoint, taken before the author does something risky. */
+export async function createSnapshotAction(raw: { planId: string; label?: string }) {
+  const planId = z.string().min(1).parse(raw.planId);
+  const plan = await scopedPlan(planId);
+  const label = (raw.label ?? "").trim() || "Manual checkpoint";
+
+  await snapshotPlan(plan.id, label.slice(0, 120), "manual");
+  revalidatePath(`/plans/${plan.id}/versions`);
+  return { ok: true as const };
 }
 
 function toDocument(text: string) {

@@ -13,9 +13,11 @@ import { cn } from "@/lib/utils";
    it is the model, not a picture of it, and a banker can change a driver cell
    and watch coverage move.
 
-   When export is locked the panel says what is blocking rather than greying
-   out and leaving the author to guess — a locked button with no reason is the
-   most annoying thing a product can do.
+   Two locks, and the panel never conflates them. The review lock is about the
+   document and is cleared by fixing findings; the unlock is about payment and
+   is cleared by paying. A single greyed-out button with one reason would send
+   somebody to the fix-it queue to solve a billing problem, or to checkout to
+   solve an arithmetic one.
    ========================================================================== */
 
 type Blocking = { id: string; title: string; remedy: string };
@@ -48,7 +50,18 @@ const FORMATS = [
   },
 ] as const;
 
-export function ExportPanel({ planId, canExport }: { planId: string; canExport: boolean }) {
+export function ExportPanel({
+  planId,
+  reviewClear,
+  unlocked,
+}: {
+  planId: string;
+  /** No blocking findings. */
+  reviewClear: boolean;
+  /** The one-time unlock has been paid for this plan. */
+  unlocked: boolean;
+}) {
+  const canExport = reviewClear && unlocked;
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [blocking, setBlocking] = useState<Blocking[]>([]);
@@ -92,10 +105,18 @@ export function ExportPanel({ planId, canExport }: { planId: string; canExport: 
             the PDF and the deck cannot say different things.
           </p>
         </div>
-        {!canExport ? (
+        {!reviewClear ? (
           <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-critical/10 px-3 py-1 text-xs font-medium text-critical">
             <Lock aria-hidden className="size-3.5" />
             Locked by the review
+          </span>
+        ) : !unlocked ? (
+          // Neutral, not warning-coloured. Not having paid yet is a state, not
+          // a fault in the document — and the warning tint measured 4.34:1
+          // against its own tinted background, just under AA at this size.
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-strong px-3 py-1 text-xs font-medium text-secondary">
+            <Lock aria-hidden className="size-3.5" />
+            Not unlocked yet
           </span>
         ) : null}
       </div>

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireUser, getOrCreateWorkspace } from "@/lib/session";
+import { getEntitlements } from "@/lib/billing";
 
 /* ==========================================================================
    Share links.
@@ -24,9 +25,20 @@ async function scopedPlan(planId: string) {
   const workspace = await getOrCreateWorkspace(user.id, user.name);
   const plan = await db.plan.findFirst({
     where: { id: planId, workspaceId: workspace.id },
-    select: { id: true },
+    select: { id: true, unlockedAt: true },
   });
   if (!plan) throw new Error("Plan not found");
+  return { plan, workspaceId: workspace.id };
+}
+
+/** Creating a link is a paid action; revoking one never is. Somebody who lets
+ *  a subscription lapse must always be able to take a link down. */
+async function requireShareEntitlement(planId: string) {
+  const { plan, workspaceId } = await scopedPlan(planId);
+  const entitlements = await getEntitlements({ workspaceId, plan });
+  if (!entitlements.canShare) {
+    throw new Error(entitlements.blockedReason ?? "Sharing is not unlocked for this plan.");
+  }
   return plan;
 }
 
@@ -39,7 +51,7 @@ const CreateSchema = z.object({
 
 export async function createShareLinkAction(raw: z.input<typeof CreateSchema>) {
   const input = CreateSchema.parse(raw);
-  const plan = await scopedPlan(input.planId);
+  const plan = await requireShareEntitlement(input.planId);
 
   const token = randomBytes(32).toString("base64url");
   const expiresAt =
@@ -58,7 +70,7 @@ export async function createShareLinkAction(raw: z.input<typeof CreateSchema>) {
 export async function revokeShareLinkAction(raw: { planId: string; id: string }) {
   const planId = z.string().min(1).parse(raw.planId);
   const id = z.string().min(1).parse(raw.id);
-  const plan = await scopedPlan(planId);
+  const { plan } = await scopedPlan(planId);
 
   // Revoked rather than deleted: the view history is the point of the feature,
   // and deleting the link would take the record of who read it with it.

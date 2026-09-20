@@ -107,8 +107,14 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members WorkspaceMember[]
-  plans   Plan[]
+  /// Stripe customer, created lazily on first checkout. Nullable because most
+  /// workspaces never reach one.
+  stripeCustomerId String? @unique
+
+  members       WorkspaceMember[]
+  plans         Plan[]
+  purchases     Purchase[]
+  subscriptions Subscription[]
 
   @@map("workspace")
 }
@@ -173,6 +179,9 @@ model Plan {
   resilienceJson   String  @default("{}")
 
   /// Entitlement. Set when the one-time unlock is paid; gates export and share.
+  /// Written only by the webhook handler — never by a page, an action or a
+  /// redirect back from checkout, because a client that can reach the success
+  /// URL can reach it without paying.
   unlockedAt       DateTime?
 
   createdAt DateTime @default(now())
@@ -185,6 +194,7 @@ model Plan {
   citations Citation[]
   competitors Competitor[]
   shares    ShareLink[]
+  purchases Purchase[]
 
   @@index([workspaceId])
   @@index([createdById])
@@ -290,6 +300,80 @@ model Competitor {
 
   @@index([planId])
   @@map("competitor")
+}
+
+/* ========================================================================== */
+/* Billing                                                                    */
+/* ========================================================================== */
+
+/// One completed payment. Recorded by the webhook, keyed on the Stripe event id
+/// so a redelivered event cannot grant a second entitlement or double-count
+/// revenue — Stripe retries on any non-2xx, and it retries a lot.
+model Purchase {
+  id          String   @id @default(cuid())
+  workspaceId String
+  /// Null for a purchase that is not tied to one plan (there are none today,
+  /// but a firm bundle would be).
+  planId      String?
+  /// "unlock" — the one-time per-plan purchase.
+  kind        String   @default("unlock")
+  /// Minor units, as Stripe reports them. Never recomputed from our own price
+  /// table: what was actually charged is what gets recorded.
+  amount      Int
+  currency    String   @default("usd")
+  /// The Stripe event that created this row. Unique, and that uniqueness is
+  /// the whole idempotency mechanism.
+  stripeEventId String @unique
+  stripeSessionId String?
+  stripePaymentIntentId String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan      Plan?     @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([planId])
+  @@map("purchase")
+}
+
+/// The optional monthly plan. State mirrored from Stripe rather than inferred:
+/// Stripe is the source of truth for whether somebody is paying, and anything
+/// we derive locally will eventually disagree with it.
+model Subscription {
+  id          String   @id @default(cuid())
+  workspaceId String
+  stripeSubscriptionId String @unique
+  stripeCustomerId     String
+  /// Stripe's own status string: active | trialing | past_due | canceled | …
+  status      String
+  /// End of the paid period. Access continues to here even after cancellation —
+  /// cutting somebody off mid-period is the behaviour this category is
+  /// criticised for.
+  currentPeriodEnd DateTime?
+  cancelAtPeriodEnd Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("subscription")
+}
+
+/// Every webhook Stripe has delivered, recorded before it is acted on. The
+/// Purchase table is idempotent for payments; this is idempotent for every
+/// other event type, and it doubles as the audit trail when a customer asks
+/// why their entitlement changed.
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  stripeEventId String @unique
+  type        String
+  /// "processed" | "ignored" | "failed"
+  outcome     String   @default("processed")
+  note        String   @default("")
+  receivedAt  DateTime @default(now())
+
+  @@map("webhook_event")
 }
 
 /// Tokenised read-only access with view tracking — the DocSend behaviour no
