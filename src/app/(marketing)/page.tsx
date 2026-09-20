@@ -36,8 +36,8 @@ export default function HomePage() {
                 Start a plan — free
                 <ArrowRight aria-hidden className="size-4" />
               </ButtonLink>
-              <ButtonLink href="/examples" variant="secondary" size="lg">
-                Read a finished plan
+              <ButtonLink href="/industries" variant="secondary" size="lg">
+                See a worked model
               </ButtonLink>
             </div>
             <p className="mt-4 text-sm text-tertiary">

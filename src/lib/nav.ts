@@ -14,10 +14,12 @@ export const solutionsNav: NavLink[] = [
   { label: "Immigration plans", href: "/solutions/immigration", blurb: "E-2, L-1A and EB-5 document structure." },
 ];
 
+/* Everything below points at a route that exists. The nav used to run ahead of
+   the build — sixteen entries, most of them 404 — on a site whose entire
+   positioning is credibility. The Learn hub and Examples come back when their
+   pages do, not before. */
 export const resourcesNav: NavLink[] = [
-  { label: "Learn", href: "/learn", blurb: "How to write a plan a lender will fund." },
-  { label: "Free tools", href: "/tools", blurb: "Six calculators on the real engine." },
-  { label: "Examples", href: "/examples", blurb: "Complete plans, readable end to end." },
+  { label: "Free tools", href: "/tools", blurb: "Seven calculators on the real engine." },
   { label: "Industries", href: "/industries", blurb: "Benchmarks and cost structures by sector." },
   { label: "Methodology", href: "/learn/methodology", blurb: "Exactly how we compute what we compute." },
 ];

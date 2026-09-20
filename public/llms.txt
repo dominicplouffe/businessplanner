@@ -43,9 +43,19 @@
 - Immigration business plans (E-2, L-1A, EB-5) — document preparation only, not
   legal advice; review by licensed counsel is recommended before filing.
 
+## Free tools
+
+Seven ungated calculators running the same modules as the product, entirely in
+the browser: loan amortisation, SBA 7(a) payment and eligibility, TAM/SAM/SOM,
+debt service coverage, unit economics, break-even, and burn and runway.
+
 ## Links
 
 - Pricing: https://getventurely.com/pricing
+- Methodology: https://getventurely.com/learn/methodology
 - Financial model: https://getventurely.com/product/financials
 - Market research: https://getventurely.com/product/market
 - Plan review: https://getventurely.com/product/review
+- Free calculators: https://getventurely.com/tools
+- Plans by industry: https://getventurely.com/industries
+- Security: https://getventurely.com/security

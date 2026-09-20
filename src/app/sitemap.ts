@@ -3,6 +3,8 @@ import { brand } from "@/lib/brand";
 import { PRODUCT_PAGES } from "@/lib/content/product";
 import { INDUSTRY_PAGES } from "@/lib/content/industries";
 import { TOOL_PAGES } from "@/lib/content/tools";
+import { LEGAL_DOCUMENTS } from "@/lib/content/legal";
+import { SOLUTION_PAGES } from "@/lib/content/solutions";
 
 /* The sitemap is built from the content collections plus the handful of
    one-off routes, and deliberately NOT from nav.ts: the nav points ahead at
@@ -14,6 +16,11 @@ const SINGLETONS: { path: string; priority: number; changeFrequency: "weekly" | 
   { path: "/pricing", priority: 0.8, changeFrequency: "monthly" },
   { path: "/industries", priority: 0.8, changeFrequency: "monthly" },
   { path: "/tools", priority: 0.8, changeFrequency: "monthly" },
+  { path: "/learn/methodology", priority: 0.7, changeFrequency: "monthly" },
+  { path: "/about", priority: 0.5, changeFrequency: "monthly" },
+  { path: "/security", priority: 0.5, changeFrequency: "monthly" },
+  { path: "/changelog", priority: 0.5, changeFrequency: "weekly" },
+  { path: "/contact", priority: 0.5, changeFrequency: "monthly" },
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
@@ -33,6 +40,16 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...TOOL_PAGES.map((t) => ({
       path: `/tools/${t.slug}`,
       priority: 0.7,
+      changeFrequency: "monthly" as const,
+    })),
+    ...SOLUTION_PAGES.map((p) => ({
+      path: `/solutions/${p.slug}`,
+      priority: 0.8,
+      changeFrequency: "monthly" as const,
+    })),
+    ...LEGAL_DOCUMENTS.map((d) => ({
+      path: `/legal/${d.slug}`,
+      priority: 0.3,
       changeFrequency: "monthly" as const,
     })),
   ];
