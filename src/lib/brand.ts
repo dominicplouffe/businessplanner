@@ -21,8 +21,8 @@ export const brand = {
     support: "support@getventurely.com",
   },
   social: {
-    x: "https://x.com/getventurally",
-    linkedin: "https://www.linkedin.com/company/getventurally",
+    x: "https://x.com/getventurely",
+    linkedin: "https://www.linkedin.com/company/getventurely",
   },
 } as const;
 

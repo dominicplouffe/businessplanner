@@ -11,7 +11,7 @@ const app = new App();
 
 const account = process.env.CDK_DEFAULT_ACCOUNT;
 const region = process.env.AWS_REGION ?? process.env.CDK_DEFAULT_REGION ?? "us-east-1";
-const domainName = app.node.tryGetContext("domainName") ?? process.env.DOMAIN_NAME ?? "getventuraly.com";
+const domainName = app.node.tryGetContext("domainName") ?? process.env.DOMAIN_NAME ?? "getventurely.com";
 const imageTag = app.node.tryGetContext("imageTag") ?? process.env.IMAGE_TAG ?? "latest";
 
 const certificate = new CertificateStack(app, "VenturallyCertificate", {

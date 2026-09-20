@@ -89,6 +89,15 @@ describe("derived values", () => {
     expect(siteUrl).toBe("https://staging.example.com");
   });
 
+  it("falls back to the production origin, spelled the one agreed way", async () => {
+    // The domain was settled once and three near-misses were in the repo before
+    // it was. A comment does not stop the fourth; this does.
+    setEnv({ ...COMPLETE, NEXT_PUBLIC_SITE_URL: undefined });
+    vi.resetModules();
+    const { siteUrl } = await import("@/lib/env");
+    expect(siteUrl).toBe("https://getventurely.com");
+  });
+
   it("picks the database driver from the URL rather than a separate flag", async () => {
     setEnv({ ...COMPLETE, DATABASE_URL: "postgres://u:p@h:5432/d" });
     vi.resetModules();

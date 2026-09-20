@@ -17,7 +17,7 @@ concurrency:
 
 env:
   AWS_REGION: us-east-1
-  DOMAIN_NAME: getventuraly.com
+  DOMAIN_NAME: getventurely.com
 
 permissions:
   contents: read

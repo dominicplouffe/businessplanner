@@ -33,7 +33,7 @@ export const databaseKind: "postgres" | "sqlite" = /^postgres(ql)?:\/\//.test(da
  * advertises production canonicals and sends Stripe customers to the wrong
  * host, so it is environment-driven with the production domain as the fallback.
  */
-export const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://getventuraly.com").replace(
+export const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://getventurely.com").replace(
   /\/$/,
   "",
 );

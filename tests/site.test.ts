@@ -244,3 +244,45 @@ describe("sample plans", () => {
     }
   });
 });
+
+/* ==========================================================================
+   One spelling of the domain.
+   --------------------------------------------------------------------------
+   Three near-misses coexisted in this repo before the domain was settled: the
+   brand word *Venturally*, a placeholder origin, and social handles, none of
+   which matched. The brand word is allowed to differ from the domain — it is a
+   different string on purpose. The domain is not allowed to differ from itself,
+   and a review comment is not what stops that recurring.
+   ========================================================================== */
+describe("the domain", () => {
+  const ROOTS = ["src", "public", "infra/bin", "infra/lib", "infra/workflows"];
+  const FILES = ["README.md", "DEPLOY.md", "CLAUDE.md", "Dockerfile", ".env.example"];
+  const WRONG = /getventur(?!ely\b)[a-z]*\.com/gi;
+
+  async function collect(dir: string, out: string[]): Promise<string[]> {
+    const { readdir } = await import("node:fs/promises");
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) await collect(path, out);
+      else out.push(path);
+    }
+    return out;
+  }
+
+  it("is spelled getventurely.com everywhere it appears", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const paths: string[] = [...FILES];
+    for (const root of ROOTS) await collect(root, paths);
+
+    const offenders: string[] = [];
+    for (const path of paths) {
+      const text = await readFile(path, "utf8");
+      for (const hit of text.match(WRONG) ?? []) offenders.push(`${path}: ${hit}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("derives the brand domain from the origin rather than restating it", () => {
+    expect(brand.domain).toBe(brand.url.replace(/^https?:\/\//, ""));
+  });
+});

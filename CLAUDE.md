@@ -22,6 +22,8 @@ pnpm build        # production build
 pnpm typecheck    # tsc --noEmit
 pnpm lint         # eslint
 pnpm test         # vitest — the engine suite is the quality gate
+pnpm e2e          # real browser through the purchase journey; needs a server on :3000
+pnpm db:push      # apply the schema locally (migrations are what production runs)
 ```
 
 ## Architecture
@@ -233,10 +235,45 @@ browser when the installed one does not match Playwright's expected build.
 they render the same document, and the shared plan is what investors actually
 read. It was briefly shipped unstyled because only the print layout imported it.
 
+## Deployment
+
+The origin is **getventurely.com** and that is settled. Nothing reads it as a
+literal: `src/lib/env.ts` exports `siteUrl` from `NEXT_PUBLIC_SITE_URL` with the
+production domain as the fallback, `brand.ts` derives `domain` and `url` from
+that, and the CDK app takes `--context domainName=`. A staging deployment
+overrides both and advertises its own canonicals. The brand word stays
+*Venturally*, which is not the same string as the domain — do not "fix" one to
+match the other.
+
+`DATABASE_URL` alone decides the driver adapter, so there is no second flag to
+get out of step: a `postgres://` URL selects `@prisma/adapter-pg`, anything else
+selects better-sqlite3. Production must be Postgres, and
+`assertProductionEnv()` refuses to boot on a SQLite URL — a container filesystem
+is discarded on every deploy, so the alternative is silently losing every plan.
+
+**Migrations, not `db push`.** `prisma migrate deploy` runs in the container's
+entrypoint before it binds a port, so a failed migration stops the task rather
+than serving traffic against a schema it does not match.
+
+`instrumentation.ts` calls the boot guard, which is why a missing Stripe key is
+a startup failure rather than a runtime fallback to `DevBilling`.
+
+The infrastructure is CDK in `infra/`: ECS Fargate behind an ALB behind
+CloudFront, RDS Postgres Multi-AZ, the certificate in its own us-east-1 stack
+because CloudFront accepts no other region. `DEPLOY.md` is the runbook.
+
+The workflow files live in `infra/workflows/` rather than `.github/workflows/`
+because the token that wrote them lacked GitHub's `workflow` scope; DEPLOY.md
+has the one command that moves them into place.
+
 ## Known gaps
 
-`typedRoutes` is off until the route surface is complete — nav data points at
-pages that arrive in the content phase. Re-enable in the polish phase.
+`typedRoutes` is off. The route surface is complete now, so the original reason
+has gone; what remains is that turning it on retypes every `href` in the app at
+once, including the ones built from data (`nav.ts`, the industry and learn
+indexes, share and print links). `tests/site.test.ts` covers the same failure
+mechanically — every nav link must resolve to a route the build generates — so
+this is a cleanup, not a hole.
 
 Regulatory values marked `confidence: "unverified"` must not be presented to a
 user as authoritative. See `CONFIG_VINTAGE.verificationQueue`.

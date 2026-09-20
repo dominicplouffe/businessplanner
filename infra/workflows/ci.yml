@@ -21,7 +21,7 @@ jobs:
       - run: pnpm test
       - run: pnpm build
         env:
-          NEXT_PUBLIC_SITE_URL: https://getventuraly.com
+          NEXT_PUBLIC_SITE_URL: https://getventurely.com
 
   # The container is the artefact that actually ships, so a PR that breaks the
   # build should say so here rather than during a deploy.
@@ -36,4 +36,4 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: NEXT_PUBLIC_SITE_URL=https://getventuraly.com
+          build-args: NEXT_PUBLIC_SITE_URL=https://getventurely.com

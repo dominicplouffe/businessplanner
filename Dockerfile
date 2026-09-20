@@ -42,7 +42,7 @@ RUN node scripts/set-db-provider.mjs postgresql && pnpm exec prisma generate
 ENV NEXT_TELEMETRY_DISABLED=1
 # Public values are inlined at build time by Next, so the origin has to be
 # known here rather than at run time.
-ARG NEXT_PUBLIC_SITE_URL=https://getventuraly.com
+ARG NEXT_PUBLIC_SITE_URL=https://getventurely.com
 ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
 RUN pnpm build
 

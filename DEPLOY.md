@@ -13,7 +13,7 @@ away from cheaper — see *Making it cheaper* at the end.
 
 - An AWS account, and credentials with admin rights **for the one-time setup
   only**. The ongoing deploys use a scoped role.
-- `getventuraly.com` in Route 53 as a **hosted zone in that same account**. If
+- `getventurely.com` in Route 53 as a **hosted zone in that same account**. If
   the domain is registered elsewhere, point its nameservers at the Route 53
   zone and wait for that to propagate before step 3 — certificate validation
   will otherwise sit pending forever.
@@ -22,21 +22,35 @@ away from cheaper — see *Making it cheaper* at the end.
 
 ---
 
-## 1. Decide the domain, once
+## 1. The domain — settled
 
-The brand is **Venturally** and the domain is **getventuraly.com** — two letters
-apart, which people will mistype. This is the last cheap moment to change it.
+**`getventurely.com`. This is decided and every default in the repo now reads
+it.** Nothing in this step needs doing; it is here so the next person does not
+reopen it.
 
-Everything reads from `NEXT_PUBLIC_SITE_URL` and `src/lib/brand.ts`, so the
-change is two edits:
+Two things follow from it that are worth knowing:
+
+The brand word is **Venturally** and the domain is **getventurely.com** — they
+are not the same string. Everything user-visible reads from `src/lib/brand.ts`,
+and the origin from `NEXT_PUBLIC_SITE_URL` (falling back to the production
+domain in `src/lib/env.ts`), so the two never have to agree in code — but a
+person typing one from memory of the other will land nowhere. Registering the
+two obvious misspellings — `getventuraly` and `getventurally`, both `.com` — as
+redirects to the apex costs about $24 a year and is worth more than that in
+traffic that would otherwise bounce.
+
+To confirm nothing has drifted:
 
 ```bash
-# infra/bin/infra.ts and infra/workflows/deploy.yml both default to the domain
-rg -n "getventuraly" --glob '!node_modules'
+# should print the correct spelling only, and never getventuraly/getventurally
+rg -n "getventur[a-z]*\.com|getventur[a-z]*" --glob '!node_modules' --glob '!cdk.out'
 ```
 
-If you keep it, also buy `getventurally.com` and redirect it. The typo traffic
-is worth more than the registration.
+The places that carry a default are `src/lib/env.ts`, `Dockerfile`,
+`infra/bin/infra.ts`, `infra/workflows/{ci,deploy}.yml` and `public/llms.txt`.
+A staging deployment overrides all of it with `NEXT_PUBLIC_SITE_URL` and
+`--context domainName=`, so nothing here is a hardcode in the sense the
+project's rules forbid.
 
 ## 2. Bootstrap CDK
 
@@ -59,7 +73,7 @@ export AWS_REGION=us-east-1
 export CDK_DEFAULT_ACCOUNT=<ACCOUNT_ID>
 
 npx cdk deploy VenturallyCertificate VenturallySite \
-  --context domainName=getventuraly.com \
+  --context domainName=getventurely.com \
   --context imageTag=bootstrap
 ```
 
@@ -78,7 +92,7 @@ afterwards.
 
 ```bash
 aws secretsmanager put-secret-value \
-  --secret-id getventuraly.com/app \
+  --secret-id getventurely.com/app \
   --secret-string "$(jq -n \
       --arg auth "$(openssl rand -base64 48)" \
       --arg stripe "sk_test_…" \
@@ -102,13 +116,13 @@ aws ecr get-login-password --region us-east-1 \
   | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
 
 docker build \
-  --build-arg NEXT_PUBLIC_SITE_URL=https://getventuraly.com \
+  --build-arg NEXT_PUBLIC_SITE_URL=https://getventurely.com \
   -t <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/venturally:first .
 
 docker push <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/venturally:first
 
 cd infra && npx cdk deploy VenturallySite \
-  --context domainName=getventuraly.com --context imageTag=first
+  --context domainName=getventurely.com --context imageTag=first
 ```
 
 The container applies the Prisma migrations on start, before it binds a port.
@@ -120,7 +134,7 @@ it does not match.
 In the Stripe dashboard, add an endpoint at:
 
 ```
-https://getventuraly.com/api/stripe/webhook
+https://getventurely.com/api/stripe/webhook
 ```
 
 Subscribe it to:
@@ -214,10 +228,10 @@ still differ in AWS are the secrets and the network.
 ## Verifying it worked
 
 ```bash
-curl -I https://getventuraly.com                    # 200, HSTS present
-curl -s https://getventuraly.com/api/health          # {"ok":true}
-curl -sI https://getventuraly.com/_next/static/…     # cache-control: immutable
-curl -s https://getventuraly.com/sitemap.xml | head  # absolute URLs on the real domain
+curl -I https://getventurely.com                    # 200, HSTS present
+curl -s https://getventurely.com/api/health          # {"ok":true}
+curl -sI https://getventurely.com/_next/static/…     # cache-control: immutable
+curl -s https://getventurely.com/sitemap.xml | head  # absolute URLs on the real domain
 ```
 
 Then walk one purchase end to end with a Stripe test card (`4242 4242 4242
