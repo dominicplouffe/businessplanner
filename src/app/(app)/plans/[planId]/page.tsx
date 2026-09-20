@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowRight, CheckCircle2, LineChart, Pencil } from "lucide-react";
+import { ArrowRight, ClipboardCheck, LineChart, Pencil } from "lucide-react";
 import { AppPageHeader } from "@/components/app/page-header";
 import { ButtonLink } from "@/components/ui/button";
 import { requireUser, getOrCreateWorkspace } from "@/lib/session";
@@ -11,7 +11,10 @@ import { computeMetrics } from "@/lib/finance/metrics";
 import { validateModel } from "@/lib/finance/validate";
 import { formatCurrency, formatMultiple, formatPercent } from "@/lib/finance/format";
 import { getBenchmark } from "@/lib/finance/benchmarks";
-import { sbaProgrammeForLoan } from "@/lib/content/regulatory";
+import { buildValidationContext } from "@/lib/review/context";
+import { buildModelIndex, checkPlan } from "@/lib/ai/consistency";
+import { scorePlan } from "@/lib/review/rubric";
+import type { PlanPurpose } from "@/lib/review/rubric";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Plan" };
@@ -47,20 +50,36 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
 
   const model = buildModel(assumptions);
   const metrics = computeMetrics(model);
-  // The programme decides which coverage threshold applies, so it is derived
-  // from the request size here exactly as the financials page derives it —
-  // two pages disagreeing about the DSCR verdict would be a bug.
-  const { programme } = sbaProgrammeForLoan(
-    assumptions.loans.reduce((sum, loan) => sum + loan.principal, 0) + assumptions.opening.debt,
+  // Built through the shared helper so this page, the financials page and the
+  // review page all reach the same verdict on the same plan — including the
+  // narrative reconciliation, which is what the validator's own check needs.
+  const purpose = plan.purpose as PlanPurpose;
+  const sectionTexts = PLAN_SECTIONS.map((section) => ({
+    key: section.key,
+    title: section.title,
+    text: plan.sections.find((s) => s.key === section.key)?.contentText ?? "",
+  }));
+  const consistency = checkPlan(
+    sectionTexts,
+    buildModelIndex(model, metrics, assumptions),
   );
-  const validation = validateModel(model, metrics, {
-    purpose: plan.purpose as "sba-loan" | "investor" | "immigration" | "internal",
-    sbaProgramme: programme,
+  const validation = validateModel(
+    model,
+    metrics,
+    buildValidationContext({ purpose, assumptions, consistency }),
+  );
+  const readiness = scorePlan({
+    purpose,
+    assumptions,
+    model,
+    metrics,
+    validation,
+    consistency,
+    sectionsWritten: sectionTexts.filter((s) => s.text.trim().length > 0).map((s) => s.key),
+    sectionsExpected: sectionTexts.map((s) => s.key),
   });
 
   const writtenCount = plan.sections.filter((s) => s.contentText.trim().length > 0).length;
-  const blocking = validation.findings.filter((f) => f.severity === "blocking");
-  const advisory = validation.findings.filter((f) => f.severity === "warning");
 
   const year1 = model.annual[0];
   const year3 = model.annual[2] ?? model.annual.at(-1);
@@ -80,6 +99,10 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
             <ButtonLink href={`/plans/${plan.id}/financials`} variant="secondary">
               <LineChart aria-hidden className="size-4" />
               Financials
+            </ButtonLink>
+            <ButtonLink href={`/plans/${plan.id}/review`} variant="secondary">
+              <ClipboardCheck aria-hidden className="size-4" />
+              Review
             </ButtonLink>
             <ButtonLink href={`/plans/${plan.id}/intake`} variant="secondary">
               <Pencil aria-hidden className="size-4" />
@@ -123,46 +146,56 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
           </p>
         </section>
 
-        {/* Review findings — the engine's validator, surfaced immediately */}
+        {/* Readiness — a summary that links through, rather than a second
+            copy of the findings. Two screens listing findings under different
+            contexts is how they start disagreeing. */}
         <section aria-labelledby="review" className="rounded-lg border border-hairline p-6">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 id="review" className="font-display text-xl">Plan review</h2>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-2xl">
+              <h2 id="review" className="font-display text-xl">Readiness</h2>
               <p className="mt-1.5 text-sm leading-relaxed text-secondary">
-                {validation.blockingCount === 0
-                  ? "Nothing is blocking export. These are the things a reader may still push on."
-                  : `${validation.blockingCount} must be resolved before the plan can be exported. The rest are worth a look but are your call.`}
+                {readiness.verdict}
               </p>
             </div>
-            <span
-              className={cn(
-                "shrink-0 rounded-full px-2.5 py-1 text-xs font-medium",
-                validation.blockingCount === 0 ? "bg-good/10 text-good" : "bg-critical/10 text-critical",
-              )}
-            >
-              {validation.blockingCount} blocking · {validation.warningCount} advisory
-            </span>
+            <div className="text-right">
+              <p className="figure-hero font-display text-3xl tracking-[-0.02em]">
+                {readiness.score}
+                <span className="text-lg text-tertiary">/100</span>
+              </p>
+              <p
+                className={cn(
+                  "text-xs font-medium",
+                  readiness.band === "ready"
+                    ? "text-good"
+                    : readiness.band === "not-ready"
+                      ? "text-critical"
+                      : "text-secondary",
+                )}
+              >
+                {readiness.bandLabel}
+              </p>
+            </div>
           </div>
 
-          {validation.findings.length === 0 ? (
-            <p className="mt-5 flex items-center gap-2 text-sm text-good">
-              <CheckCircle2 aria-hidden className="size-4" />
-              No findings. That is rare — worth a second look at your assumptions.
-            </p>
-          ) : (
-            <div className="mt-6 space-y-8">
-              <FindingGroup
-                heading="Blocking"
-                caption="Export stays locked until these are resolved."
-                findings={blocking}
-              />
-              <FindingGroup
-                heading="Worth a look"
-                caption="These may be perfectly defensible — but a reader will ask."
-                findings={advisory}
-              />
-            </div>
-          )}
+          <p className="mt-5 text-sm text-tertiary">
+            <span className="numeric">{validation.blockingCount}</span> blocking
+            <span aria-hidden className="mx-2">·</span>
+            <span className="numeric">{validation.warningCount}</span> advisory
+            {consistency.checkedCount > 0 ? (
+              <>
+                <span aria-hidden className="mx-2">·</span>
+                <span className="numeric">{consistency.reconciledCount}</span> of{" "}
+                <span className="numeric">{consistency.checkedCount}</span> figures reconciled
+              </>
+            ) : null}
+          </p>
+
+          <ButtonLink href={`/plans/${plan.id}/review`} size="sm" className="mt-5">
+            {validation.blockingCount + validation.warningCount === 0
+              ? "See what was checked"
+              : "Open the fix-it queue"}
+            <ArrowRight aria-hidden className="size-3.5" />
+          </ButtonLink>
         </section>
 
         {/* Sections — placeholders until generation lands */}
@@ -210,53 +243,6 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
         </p>
       </div>
     </>
-  );
-}
-
-function FindingGroup({
-  heading,
-  caption,
-  findings,
-}: {
-  heading: string;
-  caption: string;
-  findings: { id: string; severity: string; title: string; detail: string; remedy: string }[];
-}) {
-  if (findings.length === 0) return null;
-  const isBlocking = heading === "Blocking";
-
-  return (
-    <section aria-labelledby={`findings-${heading}`}>
-      <div className="flex items-baseline gap-3">
-        <h3
-          id={`findings-${heading}`}
-          className={cn(
-            "text-eyebrow font-medium uppercase",
-            isBlocking ? "text-critical" : "text-warning",
-          )}
-        >
-          {heading}
-        </h3>
-        <span className="numeric text-xs text-tertiary">{findings.length}</span>
-      </div>
-      <p className="mt-1 text-sm text-tertiary">{caption}</p>
-
-      <ul className="mt-3 divide-y divide-hairline border-t border-hairline">
-        {findings.map((finding) => (
-          <li key={finding.id} className="flex items-start gap-3 py-4">
-            <AlertTriangle
-              aria-hidden
-              className={cn("mt-0.5 size-4 shrink-0", isBlocking ? "text-critical" : "text-warning")}
-            />
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-primary">{finding.title}</p>
-              <p className="mt-1 text-sm leading-relaxed text-secondary">{finding.detail}</p>
-              <p className="mt-1.5 text-sm leading-relaxed text-tertiary">{finding.remedy}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }
 

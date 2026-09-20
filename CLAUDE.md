@@ -104,6 +104,23 @@ use. The system prompt forbids inventing any others. `tests/ai.test.ts` enforces
 this mechanically: every currency figure appearing in generated prose must trace
 to a value the engine computed. That test is the seed of the consistency checker.
 
+`consistency.ts` reconciles written prose against the engine: it extracts every
+figure carrying an explicit marker (currency symbol, percent sign, × , or an
+employment noun) and requires each to match a value in `buildModelIndex()`.
+Two rules keep it from crying wolf, which would be worse than not checking:
+tolerance is derived from how precisely the figure was written ("$623.2K" was
+rounded to the nearest hundred, so it matches within fifty), and bare numbers
+are never checked — they are years and street numbers far more often than
+claims. Anything the facts block licenses the generator to use must be in the
+index too, benchmarks and payroll loading included, or the check reports the
+generator's honest citations as fabrications. `tests/consistency.test.ts` runs
+the real generator over every section of two business models and requires zero
+findings.
+
+Validation context is built in one place, `src/lib/review/context.ts`. Every
+page that validates goes through it — the plan page and the review page
+reporting different verdicts on the same plan would destroy trust in both.
+
 Keep `SYSTEM_PROMPT` byte-stable — it carries the cache breakpoint, so a date or
 a reordered rule invalidates the cached prefix on every request. Per-plan content
 goes in the user message, after the breakpoint.

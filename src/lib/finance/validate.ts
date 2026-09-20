@@ -57,6 +57,11 @@ function at(arr: number[], i: number): number {
   return arr[i] ?? 0;
 }
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+/** "1 figure", "3 figures", "no competitors" — findings are read by people. */
+function count(n: number, singular: string, plural = `${singular}s`): string {
+  if (n === 0) return `no ${plural}`;
+  return `${n} ${n === 1 ? singular : plural}`;
+}
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
@@ -182,7 +187,9 @@ export function validateModel(
       id: "narrative-model-mismatch",
       severity: "blocking",
       title: "The narrative contradicts the model",
-      detail: `${ctx.unreconciledFigureCount} figure(s) in the written sections do not match any value in the financial model.`,
+      detail: `${count(ctx.unreconciledFigureCount ?? 0, "figure")} in the written sections ${
+        (ctx.unreconciledFigureCount ?? 0) === 1 ? "does" : "do"
+      } not match any value in the financial model.`,
       remedy: "Reconcile each one. Export stays locked until the prose and the statements agree.",
       anchor: "/review/consistency",
     });
@@ -194,7 +201,9 @@ export function validateModel(
       id: "uncited-statistics",
       severity: "blocking",
       title: "Uncited statistics in the narrative",
-      detail: `${ctx.uncitedStatisticCount} claim(s) carry no dated, retrievable source. Unsourced market claims are the most commonly cited reason plans are rejected.`,
+      detail: `${count(ctx.uncitedStatisticCount ?? 0, "claim")} ${
+        (ctx.uncitedStatisticCount ?? 0) === 1 ? "carries" : "carry"
+      } no dated, retrievable source. Unsourced market claims are the most commonly cited reason plans are rejected.`,
       remedy: "Cite each claim or remove it.",
       anchor: "/market/sources",
     });
@@ -221,7 +230,7 @@ export function validateModel(
         id: "insufficient-competitor-evidence",
         severity: "blocking",
         title: "Fewer than three named competitors with dated evidence",
-        detail: `The market section names ${competitors} competitor(s)${
+        detail: `The market section names ${count(competitors, "competitor")}${
           ctx.competitorsHaveDatedEvidence === false ? " and the pricing evidence is undated" : ""
         }. A competitive analysis without named, dated evidence reads as generic.`,
         remedy: "Name at least three real competitors with a URL and a dated price point each.",
@@ -246,9 +255,10 @@ export function validateModel(
         id: "no-coherent-downside",
         severity: "blocking",
         title: "No coherent downside scenario",
-        detail: `The downside case moves ${
-          ctx.downsideScenarioDriverCount ?? 0
-        } driver(s). A credible downside moves revenue and spend together — cutting revenue alone is not a scenario.`,
+        detail: `The downside case moves ${count(
+          ctx.downsideScenarioDriverCount ?? 0,
+          "driver",
+        )}. A credible downside moves revenue and spend together — cutting revenue alone is not a scenario.`,
         remedy: "Build a downside that adjusts at least five drivers, including cost response.",
         anchor: "/financials/scenarios",
       });
@@ -392,11 +402,15 @@ export function validateModel(
     add({
       id: "flat-opex",
       severity: "warning",
-      title: `${longHorizonFlat.length} cost line(s) never change across the horizon`,
+      title: `${count(longHorizonFlat.length, "cost line")} never ${
+        longHorizonFlat.length === 1 ? "changes" : "change"
+      } across the horizon`,
       detail: `${longHorizonFlat
         .slice(0, 3)
         .map((o) => o.name)
-        .join(", ")}${longHorizonFlat.length > 3 ? "…" : ""} stay flat for more than two years.`,
+        .join(", ")}${longHorizonFlat.length > 3 ? "…" : ""} ${
+        longHorizonFlat.length === 1 ? "stays" : "stay"
+      } flat for more than two years.`,
       remedy: "Apply an inflation rate, or note why the cost is genuinely fixed.",
       anchor: "/financials/expenses",
     });

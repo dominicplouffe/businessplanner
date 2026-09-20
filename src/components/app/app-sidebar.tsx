@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FileText, LayoutDashboard, LineChart, Plus } from "lucide-react";
+import { ClipboardCheck, FileText, LayoutDashboard, LineChart, Plus } from "lucide-react";
 import { Logo } from "@/components/marketing/logo";
 import { UserMenu } from "./user-menu";
 import { ButtonLink } from "@/components/ui/button";
@@ -66,6 +66,15 @@ export function AppSidebar({
                             active={pathname === `/plans/${plan.id}/financials`}
                           >
                             Financials
+                          </NavItem>
+                        </li>
+                        <li>
+                          <NavItem
+                            href={`/plans/${plan.id}/review`}
+                            icon={<ClipboardCheck aria-hidden className="size-4" />}
+                            active={pathname === `/plans/${plan.id}/review`}
+                          >
+                            Review
                           </NavItem>
                         </li>
                       </ul>
