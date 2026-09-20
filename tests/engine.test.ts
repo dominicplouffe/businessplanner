@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildModel } from "@/lib/finance/engine";
-import { AssumptionsSchema } from "@/lib/finance/types";
+import { AssumptionsSchema, type AssumptionsInput } from "@/lib/finance/types";
 import { restaurantPlan, saasPlan } from "./fixtures";
 
 const sum = (a: number[]) => a.reduce((s, v) => s + v, 0);
@@ -199,5 +199,174 @@ describe("AssumptionsSchema", () => {
     expect(a.company.currency).toBe("USD");
     expect(a.payroll.payrollTaxRate).toBeCloseTo(0.0765);
     expect(a.tax.corporateRate).toBeCloseTo(0.21);
+  });
+});
+
+/* ==========================================================================
+   Payroll that follows the business.
+   --------------------------------------------------------------------------
+   The reported plan grew revenue to $4.3 trillion while salaries stayed at
+   $11,965 in every month of every year. Two separate causes: the loaded cost
+   was computed once per role and written unchanged into every month, and
+   nothing related headcount to how much work there was.
+   ========================================================================== */
+describe("buildModel — payroll follows the business", () => {
+  /** One role, one flat stream, so payroll is the only thing moving. */
+  const withRoles = (roles: AssumptionsInput["roles"], extra: Partial<AssumptionsInput> = {}) =>
+    buildModel({
+      company: { name: "Staffing", startDate: "2026-01-01", industryKey: "other", horizonMonths: 60 },
+      revenueStreams: [
+        {
+          id: "units", name: "Units", kind: "unit-sales",
+          unitsMonth1: 1000, pricePerUnit: 100, costPerUnit: 40,
+          growth: { shape: "flat" },
+        },
+      ],
+      roles,
+      registry: { "roles.0.annualSalary": { provenance: "known" } },
+      ...extra,
+    } as AssumptionsInput);
+
+  it("pays a raise rather than the same salary for five years", () => {
+    const model = withRoles(
+      [{ id: "owner", title: "Owner", annualSalary: 120_000, isOwner: true, annualRaiseRate: 0.03 }],
+      {},
+    );
+    const owner = model.pnl.ownerCompensation ?? [];
+    const first = owner[0]!;
+    // Indexed from the role's own start, so the first twelve months sit at the
+    // salary that was offered and year two is the first raise.
+    expect(owner[11]! / first).toBeCloseTo(1, 6);
+    expect(owner[12]! / first).toBeCloseTo(1.03, 6);
+    expect(owner[59]! / first).toBeCloseTo(Math.pow(1.03, 4), 6);
+  });
+
+  it("falls back to the company-wide raise when a role states none", () => {
+    const model = withRoles([{ id: "owner", title: "Owner", annualSalary: 120_000, isOwner: true }], {
+      payroll: { payrollTaxRate: 0.0765, benefitsRate: 0.12, annualSalaryInflation: 0.02 },
+    });
+    const owner = model.pnl.ownerCompensation ?? [];
+    expect(owner[12]! / owner[0]!).toBeCloseTo(1.02, 6);
+  });
+
+  it("hires as the work arrives, in whole people", () => {
+    // 1000 units a month at 400 units a head is 2.5 heads, so three people.
+    const model = withRoles([
+      { id: "owner", title: "Owner", annualSalary: 90_000, isOwner: true },
+      {
+        id: "crew", title: "Crew", annualSalary: 48_000, isDirectLabour: true,
+        staffing: { driver: "stream-volume", streamId: "units", perHead: 400 },
+      },
+    ]);
+    expect(model.headcount.directLabour[0]).toBe(3);
+    expect(model.headcount.total[0]).toBe(4);
+    expect(model.headcount.owner[0]).toBe(1);
+  });
+
+  it("never hires past the maximum the plan states", () => {
+    const model = withRoles([
+      { id: "owner", title: "Owner", annualSalary: 90_000, isOwner: true },
+      {
+        id: "crew", title: "Crew", annualSalary: 48_000,
+        staffing: { driver: "stream-volume", streamId: "units", perHead: 100, maxCount: 4 },
+      },
+    ]);
+    for (let i = 0; i < 60; i++) {
+      expect(model.headcount.total[i]! - model.headcount.owner[i]!, `month ${i + 1}`).toBeLessThanOrEqual(4);
+    }
+  });
+
+  it("lands the hire with the work rather than ahead of it", () => {
+    const ramping = (hireLagMonths: number) =>
+      buildModel({
+        company: { name: "Lag", startDate: "2026-01-01", industryKey: "other", horizonMonths: 36 },
+        revenueStreams: [
+          {
+            id: "units", name: "Units", kind: "unit-sales",
+            unitsMonth1: 100, pricePerUnit: 10,
+            growth: { shape: "saturating", monthlyRate: 0.2, ceiling: 1000, terminalAnnualRate: 0 },
+          },
+        ],
+        roles: [
+          { id: "owner", title: "Owner", annualSalary: 60_000, isOwner: true },
+          {
+            id: "crew", title: "Crew", annualSalary: 40_000,
+            staffing: { driver: "stream-volume", streamId: "units", perHead: 150, hireLagMonths },
+          },
+        ],
+        registry: { "roles.0.annualSalary": { provenance: "known" } },
+      } as AssumptionsInput);
+
+    const prompt = ramping(0).headcount.total;
+    const lagged = ramping(3).headcount.total;
+    // The lagged plan is never ahead of the prompt one, and is behind it
+    // somewhere — the whole point of the field.
+    let everBehind = false;
+    for (let i = 0; i < 36; i++) {
+      expect(lagged[i]!, `month ${i + 1}`).toBeLessThanOrEqual(prompt[i]!);
+      if (lagged[i]! < prompt[i]!) everBehind = true;
+    }
+    expect(everBehind).toBe(true);
+  });
+
+  it("does not hire and fire the same person every winter", () => {
+    // Seasonality swings volume hard. Without the ratchet the crew would be
+    // dismissed every February and rehired every June, which no plan means.
+    const model = withRoles(
+      [
+        { id: "owner", title: "Owner", annualSalary: 60_000, isOwner: true },
+        {
+          id: "crew", title: "Crew", annualSalary: 40_000,
+          staffing: { driver: "stream-volume", streamId: "units", perHead: 300 },
+        },
+      ],
+      {
+        revenueStreams: [
+          {
+            id: "units", name: "Units", kind: "unit-sales",
+            unitsMonth1: 1000, pricePerUnit: 100,
+            growth: { shape: "flat" },
+            seasonality: [0.4, 0.4, 0.7, 1.0, 1.3, 1.6, 1.6, 1.4, 1.0, 0.8, 0.6, 0.4],
+          },
+        ],
+      },
+    );
+    for (let i = 1; i < 60; i++) {
+      expect(model.headcount.total[i]!, `month ${i + 1}`).toBeGreaterThanOrEqual(
+        model.headcount.total[i - 1]!,
+      );
+    }
+  });
+
+  it("pays for the billable people it sells", () => {
+    // The defect this closes: hourly-services grew billable heads to produce
+    // revenue and charged nothing for them, so the two sides of the same
+    // person were modelled independently.
+    const model = buildModel({
+      company: { name: "Agency", startDate: "2026-01-01", industryKey: "professional-services", horizonMonths: 60 },
+      revenueStreams: [
+        {
+          id: "billing", name: "Billable work", kind: "hourly-services",
+          billableHeadcount: 3, hourlyRate: 150, utilisation: 0.7,
+          growth: { shape: "linear", perMonth: 0.1, max: 9 },
+        },
+      ],
+      roles: [
+        { id: "owner", title: "Owner", annualSalary: 120_000, isOwner: true },
+        {
+          id: "consultants", title: "Consultants", annualSalary: 110_000, isDirectLabour: true,
+          staffing: { driver: "billable-heads", streamId: "billing", perHead: 1, minCount: 2 },
+        },
+      ],
+      registry: { "roles.0.annualSalary": { provenance: "known" } },
+    } as AssumptionsInput);
+
+    const billable = model.streams[0]!.billableHeads!;
+    for (let i = 0; i < 60; i++) {
+      const paid = model.headcount.directLabour[i]! + model.headcount.owner[i]!;
+      expect(billable[i]!, `month ${i + 1}: ${billable[i]} billable vs ${paid} paid`).toBeLessThanOrEqual(
+        paid + 0.5,
+      );
+    }
   });
 });

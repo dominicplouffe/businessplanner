@@ -1,4 +1,4 @@
-import { AssumptionsSchema, type Assumptions, type AssumptionsInput, type OpexCategory } from "./types";
+import { AssumptionsSchema, type Assumptions, type AssumptionsInput, type OpexCategory, type Staffing } from "./types";
 import { projectStream, type StreamResult } from "./revenue";
 import { capexByMonth, depreciationByMonth } from "./depreciation";
 import { debtServiceByMonth } from "./loans";
@@ -115,6 +115,10 @@ export type FinancialModel = {
   balanceSheet: BalanceSheet;
   annual: AnnualSummary[];
   debtService: { interest: MonthlyLine; principal: MonthlyLine };
+  /** People on the payroll each month, which now varies. Read by the
+   *  revenue-per-employee rule, the billable-heads rule and the public
+   *  worked examples, all of which used to re-derive it from `role.count`. */
+  headcount: { total: MonthlyLine; directLabour: MonthlyLine; owner: MonthlyLine };
   checks: {
     balanceSheetTie: { worstAbsolute: number; worstMonth: number; passes: boolean };
   };
@@ -159,19 +163,72 @@ export function buildModel(input: AssumptionsInput | Assumptions): FinancialMode
   }
 
   /* ---- Payroll ---------------------------------------------------------- */
+  /* Computed inside the month loop, not once per role.
+
+     It used to be hoisted, which made company payroll a step function: flat
+     within each role's window, no raises, and no relationship to how much work
+     there was. The reported plan grew revenue to $4.3 trillion while salaries
+     stayed at $11,965 in every month of every year. A role can now derive its
+     headcount from the work (`staffing`) and carry a raise, so a growing
+     business costs what a growing business costs.
+
+     Runs after revenue is summed above, so `revenue` is complete and there is
+     no circularity — a staffing rule reads the month's revenue, and a revenue
+     stream never reads payroll. */
   const loadFactor = 1 + a.payroll.payrollTaxRate + a.payroll.benefitsRate;
   const directLabour = zeros(n);
   const payrollOpex = zeros(n);
   const ownerCompensation = zeros(n);
+  const headcountTotal = zeros(n);
+  const headcountDirect = zeros(n);
+  const headcountOwner = zeros(n);
+
+  /** What a staffing rule measures the work in, for a given month index. */
+  const workAt = (rule: Staffing, i: number): number => {
+    if (i < 0) return 0;
+    if (rule.driver === "revenue") return at(revenue, i);
+    const stream = streams.find((s) => s.id === rule.streamId);
+    if (!stream) return 0;
+    return rule.driver === "billable-heads"
+      ? at(stream.billableHeads ?? [], i)
+      : at(stream.volume, i);
+  };
 
   for (const role of a.roles) {
-    const monthlyLoaded = (role.annualSalary / 12) * role.count * loadFactor;
+    const raise = role.annualRaiseRate ?? a.payroll.annualSalaryInflation;
     const last = role.endMonth ?? n;
+    let ratchet = 0;
+
     for (let m = role.startMonth; m <= Math.min(last, n); m++) {
       const i = m - 1;
+
+      let heads = role.count;
+      if (role.staffing) {
+        const rule = role.staffing;
+        // Read the month whose work justifies the hire, so a ramp does not pay
+        // for capacity before the work that needs it arrives.
+        const work = workAt(rule, i - rule.hireLagMonths);
+        // Rounded *up*: you cannot serve 1.4 people's worth of demand with one
+        // person, and rounding up is the conservative direction in a document
+        // a lender reads.
+        const needed = Math.ceil(work / rule.perHead / rule.stepSize) * rule.stepSize;
+        heads = Math.max(rule.minCount, Math.min(needed, rule.maxCount ?? Infinity));
+        if (rule.ratchet) heads = ratchet = Math.max(ratchet, heads);
+      }
+
+      // Indexed from the role's own start, mirroring the opex inflator, so a
+      // role's first twelve months sit at the salary it was offered.
+      const yearsElapsed = Math.floor((m - role.startMonth) / 12);
+      const monthlyLoaded =
+        (role.annualSalary / 12) * heads * loadFactor * Math.pow(1 + raise, yearsElapsed);
+
       if (role.isDirectLabour) directLabour[i] = at(directLabour, i) + monthlyLoaded;
       else payrollOpex[i] = at(payrollOpex, i) + monthlyLoaded;
       if (role.isOwner) ownerCompensation[i] = at(ownerCompensation, i) + monthlyLoaded;
+
+      headcountTotal[i] = at(headcountTotal, i) + heads;
+      if (role.isDirectLabour) headcountDirect[i] = at(headcountDirect, i) + heads;
+      if (role.isOwner) headcountOwner[i] = at(headcountOwner, i) + heads;
     }
   }
 
@@ -460,6 +517,11 @@ export function buildModel(input: AssumptionsInput | Assumptions): FinancialMode
     },
     annual,
     debtService: { interest: debt.interest, principal: debt.principal },
+    headcount: {
+      total: headcountTotal,
+      directLabour: headcountDirect,
+      owner: headcountOwner,
+    },
     checks: {
       balanceSheetTie: {
         worstAbsolute,

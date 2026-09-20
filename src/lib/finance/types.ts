@@ -171,12 +171,53 @@ export const OpexCategorySchema = z.enum([
 ]);
 export type OpexCategory = z.infer<typeof OpexCategorySchema>;
 
+/**
+ * Headcount derived from how much work there is, rather than stated once and
+ * held flat for five years.
+ *
+ * The reported plan grew revenue to $4.3 trillion while salaries stayed at
+ * $11,965 in every month of every year, because `count` is a constant and
+ * nothing related it to volume. Worse, `hourly-services` already grew its
+ * *billable* heads to produce revenue and charged nothing for them — the two
+ * sides of the same person were modelled independently.
+ */
+export const StaffingSchema = z.object({
+  /** What the work is measured in. */
+  driver: z.enum(["revenue", "stream-volume", "billable-heads"]),
+  /** Which stream, for the two drivers that are not company-wide. */
+  streamId: z.string().min(1).optional(),
+  /** Revenue or volume one person can carry in a month. */
+  perHead: z.number().positive(),
+  /** Heads carried whatever the volume — the floor, not the forecast. */
+  minCount: z.number().min(0).default(0),
+  /** The most this business would ever hire into this role. */
+  maxCount: z.number().positive().optional(),
+  /** Whole people, or halves for part-time. */
+  stepSize: z.number().positive().default(1),
+  /** Months between the work arriving and the hire landing. */
+  hireLagMonths: z.number().int().min(0).max(12).default(0),
+  /**
+   * Headcount never falls once reached. On by default: without it a seasonal
+   * business hires and fires the same person every November, which no plan
+   * means and no lender believes.
+   */
+  ratchet: z.boolean().default(true),
+});
+export type Staffing = z.infer<typeof StaffingSchema>;
+
 export const RoleSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   department: z.string().default("General"),
   count: z.number().int().min(1).default(1),
   annualSalary: z.number().min(0),
+  /** Compounded from this role's own start month, so its first twelve months
+   *  sit at the quoted salary — which is what an offer letter says. Falls back
+   *  to the company-wide figure when absent. */
+  annualRaiseRate: z.number().min(-0.2).max(0.2).optional(),
+  /** Present when this role's size follows the work. Absent means a fixed
+   *  `count`, which is what every role did before. */
+  staffing: StaffingSchema.optional(),
   startMonth: z.number().int().min(1).default(1),
   endMonth: z.number().int().min(1).optional(),
   /** Owner compensation must be present and non-zero: underwriters substitute a
@@ -185,7 +226,15 @@ export const RoleSchema = z.object({
   isOwner: z.boolean().default(false),
   /** Direct labour flows to COGS rather than operating expenses. */
   isDirectLabour: z.boolean().default(false),
-});
+})
+  .refine((role) => !(role.isOwner && role.staffing), {
+    message: "An owner is one person — owner compensation cannot scale with volume.",
+    path: ["staffing"],
+  })
+  .refine((role) => !role.staffing || role.staffing.driver === "revenue" || !!role.staffing.streamId, {
+    message: "Staffing driven by a stream must name which stream.",
+    path: ["staffing", "streamId"],
+  });
 export type Role = z.infer<typeof RoleSchema>;
 
 export const OpexItemSchema = z.object({
@@ -296,8 +345,13 @@ export const AssumptionsSchema = z.object({
       payrollTaxRate: z.number().min(0).max(1).default(0.0765),
       /** Benefits and other loaded costs as a fraction of gross wages. */
       benefitsRate: z.number().min(0).max(1).default(0.12),
+      /** Company-wide annual raise, for roles that do not state their own.
+       *  Defaults to zero so introducing it moves no existing number; a plan
+       *  that leaves it there is telling its reader nobody gets a raise for
+       *  five years, which `payroll-flat` says out loud. */
+      annualSalaryInflation: z.number().min(0).max(0.15).default(0),
     })
-    .default({ payrollTaxRate: 0.0765, benefitsRate: 0.12 }),
+    .default({ payrollTaxRate: 0.0765, benefitsRate: 0.12, annualSalaryInflation: 0 }),
 
   workingCapital: z
     .object({
