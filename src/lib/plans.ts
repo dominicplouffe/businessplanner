@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "./db";
 import { AssumptionsSchema, type Assumptions, type AssumptionRegistry } from "./finance/types";
+import { PLAN_SECTIONS } from "@/lib/content/sections";
 
 /* ==========================================================================
    Plan persistence.
@@ -10,23 +11,7 @@ import { AssumptionsSchema, type Assumptions, type AssumptionRegistry } from "./
    keep evolving, and text columns behave identically on SQLite and Postgres.
    ========================================================================== */
 
-export const PLAN_SECTIONS = [
-  { key: "executive-summary", title: "Executive summary" },
-  { key: "company", title: "Company description" },
-  { key: "products", title: "Products and services" },
-  { key: "market", title: "Market analysis" },
-  { key: "competition", title: "Competitive landscape" },
-  { key: "marketing", title: "Marketing and sales" },
-  { key: "operations", title: "Operations" },
-  { key: "team", title: "Team and management" },
-  { key: "regulations", title: "Applicable regulations" },
-  { key: "risks", title: "Risks and mitigations" },
-  { key: "ai-resilience", title: "AI disruption resilience" },
-  { key: "financials", title: "Financial plan" },
-  { key: "next-steps", title: "Suggested next steps" },
-] as const;
-
-export type PlanSectionKey = (typeof PLAN_SECTIONS)[number]["key"];
+export { PLAN_SECTIONS, type PlanSectionKey } from "@/lib/content/sections";
 
 export type PlanSummary = {
   id: string;

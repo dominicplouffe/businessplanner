@@ -81,6 +81,26 @@ every client component from hydrating and makes any measurement-based component
 look broken. `allowedDevOrigins` in `next.config.ts` covers 127.0.0.1 and
 localhost.
 
+## The AI layer
+
+`src/lib/ai/` has two generators behind one interface. `AnthropicGenerator` calls
+`claude-opus-5` with adaptive thinking and a byte-stable cached system prompt.
+`FixtureGenerator` composes prose deterministically from engine output and runs
+whenever `ANTHROPIC_API_KEY` is absent.
+
+The fixture path is **not** a stub. It writes real sentences around the same
+computed figures, which means the product demos with no key and no spend, and
+the end-to-end tests are free and deterministic.
+
+`buildFactsBlock()` in `context.ts` assembles the only numbers a generator may
+use. The system prompt forbids inventing any others. `tests/ai.test.ts` enforces
+this mechanically: every currency figure appearing in generated prose must trace
+to a value the engine computed. That test is the seed of the consistency checker.
+
+Keep `SYSTEM_PROMPT` byte-stable — it carries the cache breakpoint, so a date or
+a reordered rule invalidates the cached prefix on every request. Per-plan content
+goes in the user message, after the breakpoint.
+
 ## Known gaps
 
 `typedRoutes` is off until the route surface is complete — nav data points at

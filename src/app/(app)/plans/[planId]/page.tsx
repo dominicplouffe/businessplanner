@@ -50,6 +50,7 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
     purpose: plan.purpose as "sba-loan" | "investor" | "immigration" | "internal",
   });
 
+  const writtenCount = plan.sections.filter((s) => s.contentText.trim().length > 0).length;
   const blocking = validation.findings.filter((f) => f.severity === "blocking");
   const advisory = validation.findings.filter((f) => f.severity === "warning");
 
@@ -61,7 +62,11 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
       <AppPageHeader
         eyebrow={benchmark.label}
         title={plan.companyName || plan.title}
-        lede="The model is built. Writing the plan around it comes next."
+        lede={
+          writtenCount === 0
+            ? "The model is built. Now the plan gets written around it."
+            : `${writtenCount} of ${PLAN_SECTIONS.length} sections written.`
+        }
         actions={
           <ButtonLink href={`/plans/${plan.id}/intake`} variant="secondary">
             <Pencil aria-hidden className="size-4" />
@@ -141,26 +146,36 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
 
         {/* Sections — placeholders until generation lands */}
         <section aria-labelledby="sections">
-          <h2 id="sections" className="font-display text-xl">The document</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 id="sections" className="font-display text-xl">The document</h2>
+            <ButtonLink href={`/plans/${plan.id}/sections/${PLAN_SECTIONS[0]!.key}`} size="sm">
+              {writtenCount === 0 ? "Start writing" : "Continue writing"}
+              <ArrowRight aria-hidden className="size-3.5" />
+            </ButtonLink>
+          </div>
           <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-secondary">
-            Thirteen sections, each written against the model above rather than
-            beside it. Generation arrives in the next phase.
+            {PLAN_SECTIONS.length} sections, each written against the model above
+            rather than beside it. {writtenCount} written so far.
           </p>
           <ul className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {PLAN_SECTIONS.map((section, index) => {
               const stored = plan.sections.find((s) => s.key === section.key);
+              const written = (stored?.contentText.trim().length ?? 0) > 0;
               return (
-                <li
-                  key={section.key}
-                  className="flex items-center gap-3 rounded-sm border border-hairline px-4 py-3"
-                >
-                  <span className="numeric text-xs text-brass-600">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-sm text-secondary">{section.title}</span>
-                  <span className="shrink-0 text-xs text-tertiary">
-                    {stored?.status === "empty" || !stored ? "Not written" : stored.status}
-                  </span>
+                <li key={section.key}>
+                  <Link
+                    href={`/plans/${plan.id}/sections/${section.key}`}
+                    className="flex items-center gap-3 rounded-sm border border-hairline px-4 py-3 transition-colors hover:border-strong"
+                  >
+                    <span className="numeric text-xs text-brass-600">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-secondary">{section.title}</span>
+                    <span
+                      aria-label={written ? "Written" : "Not written"}
+                      className={cn("size-1.5 shrink-0 rounded-full", written ? "bg-emerald-600" : "bg-ink-300")}
+                    />
+                  </Link>
                 </li>
               );
             })}
