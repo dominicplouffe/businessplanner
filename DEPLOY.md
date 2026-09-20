@@ -223,6 +223,13 @@ open http://localhost:3000
 If it boots, migrates and serves `/api/health` there, the only things that can
 still differ in AWS are the secrets and the network.
 
+The first build takes several minutes longer than you expect, because the deps
+stage compiles better-sqlite3 from source — the 12.x that
+`@prisma/adapter-better-sqlite3` pulls in ships no prebuilt binding. That is why
+the deps stage installs `python3 make g++`. If you see
+`gyp ERR! find Python` in a build, that install line has gone missing; nothing
+else in the image needs a compiler, and the runtime stage deliberately has none.
+
 ---
 
 ## Verifying it worked

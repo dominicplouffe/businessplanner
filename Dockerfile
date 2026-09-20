@@ -18,6 +18,22 @@ ARG NODE_VERSION=22.22.0
 # ---- deps ---------------------------------------------------------------
 FROM node:${NODE_VERSION}-bookworm-slim AS deps
 WORKDIR /app
+# A compiler, for one transitive native module. `@prisma/adapter-better-sqlite3`
+# pulls better-sqlite3 12.x, which — unlike the 13.x we depend on directly —
+# ships no prebuilt bindings in its tarball: its install script tries
+# `prebuild-install` against GitHub releases and falls back to node-gyp. On a
+# slim image that fallback finds no Python and fails the whole install, which is
+# how this first broke. Building it locally removes the dependency on somebody
+# else's release CDN being reachable from wherever the image is built.
+#
+# Production runs Postgres and never constructs the SQLite adapter, but the
+# module is still imported, so the binding has to exist. The toolchain stays in
+# this stage: the runtime image gets the compiled binding, not a compiler.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 \
+      make \
+      g++ \
+    && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 COPY package.json pnpm-lock.yaml ./
 COPY prisma ./prisma
