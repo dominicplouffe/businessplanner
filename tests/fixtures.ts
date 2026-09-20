@@ -18,7 +18,11 @@ export const saasPlan: AssumptionsInput = {
       kind: "subscription",
       initialCustomers: 0,
       newCustomersMonth1: 18,
-      newCustomerGrowthRate: 0.05,
+      // Acquisition the channel can carry, and the seats the product can
+      // serve. Both are required now: a stream that declares no limit is a
+      // blocking finding, which is the point.
+      growth: { shape: "saturating", monthlyRate: 0.05, ceiling: 46, terminalAnnualRate: 0.02 },
+      customerCeiling: 1_400,
       monthlyChurnRate: 0.02,
       pricePerCustomerPerMonth: 149,
       expansionRate: 0.004,
@@ -80,7 +84,9 @@ export const restaurantPlan: AssumptionsInput = {
       conversionRate: 0.62,
       averageTicket: 38,
       openDaysPerMonth: 26,
-      monthlyGrowthRate: 0.012,
+      // 130 covers a day in the room today; 182 is a full house at every
+      // service, and no growth rate takes a dining room past its seats.
+      growth: { shape: "saturating", monthlyRate: 0.012, ceiling: 4_739, terminalAnnualRate: 0.02 },
       cogsPercent: 0.31,
       seasonality: [0.88, 0.9, 0.97, 1.02, 1.06, 1.08, 1.05, 1.03, 1.0, 1.01, 0.99, 1.01],
     },

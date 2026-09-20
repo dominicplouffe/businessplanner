@@ -1,5 +1,6 @@
 import { buildModel, type FinancialModel } from "./engine";
 import type { Assumptions } from "./types";
+import type { GrowthCurve } from "./growth";
 
 /* ==========================================================================
    Scenarios and sensitivity.
@@ -57,8 +58,32 @@ export function driversMoved(adj: ScenarioAdjustment): number {
   return count;
 }
 
+/**
+ * Capacity moves with the case.
+ *
+ * A scenario scales the level drivers, so without this the upside is clipped
+ * by a ceiling calibrated for the base case — the optimistic plan quietly
+ * becomes the base plan, and the volume row of the sensitivity tornado
+ * under-reports, telling a founder that volume matters less than it does.
+ *
+ * The reading is that an upside is a bigger business, not the same business
+ * working harder: more covers means more room, more units means more line.
+ */
+function scaleCapacity<T extends { growth?: GrowthCurve }>(stream: T, volume: number): T {
+  if (!stream.growth || volume === 1) return stream;
+  const growth = stream.growth;
+  if (growth.shape === "saturating") {
+    return { ...stream, growth: { ...growth, ceiling: growth.ceiling * volume } };
+  }
+  if (growth.shape === "linear" && growth.max !== undefined) {
+    return { ...stream, growth: { ...growth, max: growth.max * volume } };
+  }
+  return stream;
+}
+
 function applyAdjustment(a: Assumptions, adj: ScenarioAdjustment): Assumptions {
-  const streams = a.revenueStreams.map((s) => {
+  const streams = a.revenueStreams.map((raw) => {
+    const s = scaleCapacity(raw, adj.volume);
     const startMonth = s.startMonth + adj.rampDelayMonths;
     switch (s.kind) {
       case "subscription":
@@ -67,6 +92,9 @@ function applyAdjustment(a: Assumptions, adj: ScenarioAdjustment): Assumptions {
           startMonth,
           initialCustomers: s.initialCustomers * adj.volume,
           newCustomersMonth1: s.newCustomersMonth1 * adj.volume,
+          ...(s.customerCeiling !== undefined
+            ? { customerCeiling: s.customerCeiling * adj.volume }
+            : {}),
           pricePerCustomerPerMonth: s.pricePerCustomerPerMonth * adj.price,
           monthlyChurnRate: Math.max(0, Math.min(1, s.monthlyChurnRate + adj.churnDelta)),
         };

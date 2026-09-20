@@ -62,8 +62,14 @@ export const EXAMPLE_PLANS: ExamplePlan[] = [
       populationCount: 41_000,
       qualifiedShare: 0.38,
       annualSpendPerCustomer: 940,
-      servableShare: 0.16,
-      targetShare: 0.055,
+      /* Servable and target were the wrong shape: `targetShare` is a share of
+         the *servable* slice, and these were set as though it were a share of
+         the whole market. The result was four sample plans each claiming a
+         market ten to twenty times smaller than the revenue they forecast —
+         the product's own samples failing the check it now runs. Re-derived so
+         the obtainable figure lands on what the model projects for year three. */
+      servableShare: 0.34,
+      targetShare: 0.4,
       populationSource:
         "Stated by the owner from census tract data for this sample. A real plan cites the source with the date it was read.",
     },
@@ -139,8 +145,14 @@ export const EXAMPLE_PLANS: ExamplePlan[] = [
       populationCount: 2_400_000,
       qualifiedShare: 0.22,
       annualSpendPerCustomer: 210,
+      /* Servable and target were the wrong shape: `targetShare` is a share of
+         the *servable* slice, and these were set as though it were a share of
+         the whole market. The result was four sample plans each claiming a
+         market ten to twenty times smaller than the revenue they forecast —
+         the product's own samples failing the check it now runs. Re-derived so
+         the obtainable figure lands on what the model projects for year three. */
       servableShare: 0.09,
-      targetShare: 0.012,
+      targetShare: 0.172,
       populationSource:
         "Stated by the founder for this sample. A real plan cites a dated, retrievable source and the product refuses to export without one.",
     },
@@ -216,8 +228,14 @@ export const EXAMPLE_PLANS: ExamplePlan[] = [
       populationCount: 3_900,
       qualifiedShare: 0.44,
       annualSpendPerCustomer: 14_400,
-      servableShare: 0.11,
-      targetShare: 0.09,
+      /* Servable and target were the wrong shape: `targetShare` is a share of
+         the *servable* slice, and these were set as though it were a share of
+         the whole market. The result was four sample plans each claiming a
+         market ten to twenty times smaller than the revenue they forecast —
+         the product's own samples failing the check it now runs. Re-derived so
+         the obtainable figure lands on what the model projects for year three. */
+      servableShare: 0.16,
+      targetShare: 0.315,
       populationSource:
         "Stated by the owner for this sample from county population data. A real plan carries the citation and its date.",
     },
@@ -279,8 +297,14 @@ export const EXAMPLE_PLANS: ExamplePlan[] = [
       populationCount: 1_850,
       qualifiedShare: 0.3,
       annualSpendPerCustomer: 62_000,
-      servableShare: 0.14,
-      targetShare: 0.035,
+      /* Servable and target were the wrong shape: `targetShare` is a share of
+         the *servable* slice, and these were set as though it were a share of
+         the whole market. The result was four sample plans each claiming a
+         market ten to twenty times smaller than the revenue they forecast —
+         the product's own samples failing the check it now runs. Re-derived so
+         the obtainable figure lands on what the model projects for year three. */
+      servableShare: 0.18,
+      targetShare: 0.2,
       populationSource:
         "Stated by the partners for this sample from their own pipeline records.",
     },

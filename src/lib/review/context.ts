@@ -1,4 +1,5 @@
 import type { Assumptions } from "@/lib/finance/types";
+import type { FinancialModel } from "@/lib/finance/engine";
 import type { ValidationContext } from "@/lib/finance/validate";
 import type { ConsistencyReport } from "@/lib/ai/consistency";
 import { SCENARIOS, driversMoved } from "@/lib/finance/scenarios";
@@ -33,6 +34,11 @@ export function buildValidationContext(input: {
   consistency?: ConsistencyReport;
   /** Supplied once the market page has anything on it. */
   market?: MarketEvidence;
+  /**
+   * Needed for the market comparison below, which cannot run without it.
+   * Optional so callers that only inspect the other fields keep working.
+   */
+  model?: FinancialModel;
   asOf?: Date;
 }): ValidationContext {
   const { assumptions } = input;
@@ -44,7 +50,7 @@ export function buildValidationContext(input: {
     sbaProgramme: sbaProgrammeForLoan(debt, input.asOf).programme,
     downsideScenarioDriverCount: driversMoved(SCENARIOS.downside.adjustment),
     ...consistencyFields(input.consistency),
-    ...marketFields(input.market),
+    ...marketFields(input.market, input.model),
     ...(input.asOf ? { asOf: input.asOf } : {}),
   };
 }
@@ -69,10 +75,20 @@ function consistencyFields(report?: ConsistencyReport): Partial<ValidationContex
   return { unreconciledFigureCount: unreconciled, uncitedStatisticCount: uncited };
 }
 
-function marketFields(market?: MarketEvidence): Partial<ValidationContext> {
+function marketFields(
+  market?: MarketEvidence,
+  model?: FinancialModel,
+): Partial<ValidationContext> {
   if (!market) return {};
 
-  const sizing = computeSizing(market.sizing);
+  /* The model goes in.
+
+     `computeSizing` has always been able to compare what the plan projects
+     against the share of the market it says it can obtain — the module's own
+     header calls it "the check nobody else runs". It was right, and for the
+     wrong reason: this call passed no model, so `modelCheck` returned
+     "unavailable" every time and the check had never run once in production. */
+  const sizing = computeSizing(market.sizing, model);
   // Only a competitor carrying both a link and a dated price counts. The check
   // exists because undated evidence is the thing readers discount.
   const evidenced = market.competitors.filter((c) => c.url && c.priceDate).length;
@@ -84,5 +100,6 @@ function marketFields(market?: MarketEvidence): Partial<ValidationContext> {
     ...(sizing.topDown.status === "cited"
       ? { tamDivergence: sizing.topDown.divergence }
       : {}),
+    ...(sizing.modelCheck.status === "checked" ? { marketModelCheck: sizing.modelCheck } : {}),
   };
 }

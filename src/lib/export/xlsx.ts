@@ -483,12 +483,21 @@ function writeStream(
 
   switch (stream.kind) {
     case "subscription": {
+      // The stock ceiling has to bind here too, or the workbook enrols past a
+      // licence the engine stopped at. The last time these two disagreed the
+      // gap did not appear until month 57.
+      const capped = (body: string) => {
+        const ceiling = dOpt("customerCeiling", "");
+        return ceiling ? `MIN(${body},${ceiling})` : body;
+      };
       volumeRow = formulaRow(sheet, row, "Customers", months, (m, col, prev) =>
         live(
           m,
-          m === 1
-            ? `${d("initialCustomers")}*(1-${d("monthlyChurnRate")})+${d("newCustomersMonth1")}`
-            : `IF(${m}=${start},${d("initialCustomers")},${col === prev ? 0 : `${prev}${row}`})*(1-${d("monthlyChurnRate")})+${curveAt(d("newCustomersMonth1"), m)}`,
+          capped(
+            m === 1
+              ? `${d("initialCustomers")}*(1-${d("monthlyChurnRate")})+${d("newCustomersMonth1")}`
+              : `IF(${m}=${start},${d("initialCustomers")},${col === prev ? 0 : `${prev}${row}`})*(1-${d("monthlyChurnRate")})+${curveAt(d("newCustomersMonth1"), m)}`,
+          ),
         ),
       { format: "#,##0", unit: "customers" });
       row += 1;

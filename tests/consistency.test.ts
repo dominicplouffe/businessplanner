@@ -156,7 +156,20 @@ describe("reconciliation", () => {
       index,
     );
     expect(result.findings).toHaveLength(1);
-    expect(result.findings[0]!.nearest?.value).toBeCloseTo(revenue, 6);
+
+    /* The suggestion has to be the nearest thing the engine holds, derived
+       here by brute force rather than assumed to be year-one revenue. It used
+       to assert exactly that, which passed only while no other computed value
+       happened to sit closer — a coincidence of the fixture, not a property of
+       the checker, and it broke the moment the fixture's numbers moved. */
+    const nearestInIndex = index
+      .filter((v) => v.kind === "currency")
+      .reduce((best, v) =>
+        Math.abs(v.value - wrong) < Math.abs(best.value - wrong) ? v : best,
+      );
+    expect(result.findings[0]!.nearest?.value).toBeCloseTo(nearestInIndex.value, 6);
+    // And it has to be in the same territory, or the suggestion is noise.
+    expect(Math.abs(nearestInIndex.value - revenue) / revenue).toBeLessThan(0.1);
   });
 
   it("withholds a suggestion when nothing is in the same territory", () => {

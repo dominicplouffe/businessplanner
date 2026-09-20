@@ -80,6 +80,7 @@ export function assembleReview(plan: ReviewablePlan, assumptions: Assumptions) {
       assumptions,
       consistency,
       market: { sizing, competitors: plan.competitors },
+      model,
     }),
   );
 

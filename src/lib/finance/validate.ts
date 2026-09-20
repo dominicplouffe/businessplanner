@@ -1,6 +1,7 @@
 import type { FinancialModel } from "./engine";
 import type { Metrics } from "./metrics";
 import { getBenchmark, isOutOfBand } from "./benchmarks";
+import type { ModelCheck } from "@/lib/market/sizing";
 import { dscrThreshold, inForce, EQUITY_INJECTION_MINIMUM, type SbaProgramme } from "@/lib/content/regulatory";
 
 /* ==========================================================================
@@ -50,6 +51,15 @@ export type ValidationContext = {
   uncitedStatisticCount?: number;
   /** Figures in the narrative that do not resolve to a model cell. */
   unreconciledFigureCount?: number;
+  /**
+   * The market module's own comparison of projected revenue against the share
+   * the plan says it can obtain.
+   *
+   * The type, not the numbers — `computeSizing` already does this work and
+   * `src/lib/market/sizing.ts` calls it "the check nobody else runs". It was
+   * right: nothing passed the model to it, so it has never run.
+   */
+  marketModelCheck?: ModelCheck;
   asOf?: Date;
 };
 
@@ -394,19 +404,176 @@ export function validateModel(
     });
   }
 
-  // Revenue growth with no driver behind it.
-  for (const g of metrics.revenueGrowthByYear) {
-    if (g.growth !== null && g.growth > 3) {
+  /* Revenue growth with no driver behind it.
+     
+     Reports the *worst* year rather than the first. It used to `break` on the
+     earliest offender, so a plan that was calm in year two and wild in year
+     four named year two — sending the author to the wrong screen. */
+  const worstGrowth = metrics.revenueGrowthByYear
+    .filter((g): g is { year: number; growth: number } => g.growth !== null)
+    .reduce<{ year: number; growth: number } | null>(
+      (worst, g) => (worst === null || g.growth > worst.growth ? g : worst),
+      null,
+    );
+  if (worstGrowth && worstGrowth.growth > 1) {
+    const extreme = worstGrowth.growth > 3;
+    add({
+      id: `growth-unsupported-y${worstGrowth.year}`,
+      // Quadrupling in a year is not a forecast for anyone outside the
+      // building, so for an external reader it stops the export.
+      severity: extreme && purpose !== "internal" ? "blocking" : "warning",
+      title: `Year ${worstGrowth.year} revenue grows ${pct(worstGrowth.growth)}`,
+      detail: extreme
+        ? `Revenue more than quadruples in year ${worstGrowth.year}. A reader will not accept that without a named, funded driver behind it.`
+        : "Growth above 100% in a year needs an explicit driver — a funded hiring plan, a channel, a contracted pipeline.",
+      remedy: "Point the growth at a driver in the model, or moderate it.",
+      anchor: "/financials/revenue",
+    });
+  }
+
+  /* ---- Capacity ---------------------------------------------------------
+     The rules that make the ceiling mean something. Without them an author can
+     satisfy the schema by declaring a ceiling of a billion, and the model is
+     back where it started. */
+
+  for (const stream of a.revenueStreams) {
+    const shape = stream.growth?.shape;
+    const legacyRate =
+      stream.kind === "subscription"
+        ? stream.newCustomerGrowthRate
+        : stream.kind === "hourly-services" || stream.kind === "contract"
+          ? 0
+          : stream.monthlyGrowthRate;
+    const declaredRate =
+      stream.growth?.shape === "unbounded" ? stream.growth.monthlyRate : null;
+    const growing = declaredRate !== null ? declaredRate > 0 : !shape && legacyRate > 0;
+
+    if (growing) {
       add({
-        id: `growth-unsupported-y${g.year}`,
+        id: `growth-declared-unbounded-${stream.id}`,
+        severity: "blocking",
+        title: `“${stream.name}” grows without a limit`,
+        detail:
+          "Nothing in this stream says how large the business could get. A rate applied every month for five years compounds to a number no reader will accept, and the model has no way to know when to stop.",
+        remedy:
+          "State the capacity — covers a month, billable people, units you could ship, customers you could serve. The rate then decides how fast you reach it rather than where you end up.",
+        anchor: "/intake/revenue",
+      });
+    }
+  }
+
+  // A ceiling that is never approached is not a ceiling; it is a number typed
+  // to satisfy a field. Warning rather than blocking: a genuinely early-stage
+  // business can sit well under its capacity, and the scale rules are the
+  // hard backstop.
+  for (const stream of model.streams) {
+    const observed = stream.saturation.filter((v): v is number => v !== null);
+    if (observed.length === 0) continue;
+    const peak = Math.max(...observed);
+    if (peak < 0.25) {
+      add({
+        id: `capacity-never-approached-${stream.id}`,
         severity: "warning",
-        title: `Year ${g.year} revenue grows ${pct(g.growth)}`,
-        detail: "Growth above 300% in a year needs an explicit driver — a funded hiring plan, a channel, a contracted pipeline.",
-        remedy: "Point the growth at a driver in the model, or moderate it.",
-        anchor: "/financials/revenue",
+        title: `“${stream.name}” never gets near the capacity it states`,
+        detail: `The plan reaches ${pct(peak)} of the stated ceiling at its highest. A limit that far away is not constraining anything, so it tells a reader nothing.`,
+        remedy: "State the capacity you actually believe in, or explain what the larger figure represents.",
+        anchor: "/intake/revenue",
+      });
+    }
+  }
+
+  for (const stream of a.revenueStreams) {
+    const terminal = stream.growth?.shape === "saturating" ? stream.growth.terminalAnnualRate : 0;
+    if (terminal > 0.15) {
+      add({
+        id: `terminal-growth-implausible-${stream.id}`,
+        // The ceiling drift is the one term that still runs forever, so it
+        // needs its own limit. Above 40% a year in perpetuity is not a
+        // forecast, it is the old defect wearing a different field.
+        severity: terminal > 0.4 ? "blocking" : "warning",
+        title: `“${stream.name}” grows its own capacity by ${pct(terminal)} a year, forever`,
+        detail:
+          "The ceiling itself is set to rise every year for the whole horizon and beyond it. Sustained growth above the economy's is a claim about the business that the plan has to make in words.",
+        remedy: "Price inflation and a growing market are a few per cent a year. Anything more needs saying out loud.",
+        anchor: "/intake/revenue",
+      });
+    }
+  }
+
+  /* Revenue per employee.
+     
+     Deliberately an absolute sanity bound rather than an industry claim: only
+     two of the twenty-one benchmarks carry a sourced `revenuePerEmployee`
+     band, and inventing the other nineteen would break the rule that a band
+     names a real source. This catches $4.7M a head; it does not pretend to
+     know what a laundromat should do. Where a sourced band exists, the warning
+     below uses it. */
+  const ABSOLUTE_REVENUE_PER_HEAD = 1_000_000;
+  for (const year of [3, 5]) {
+    const annual = model.annual.find((y) => y.year === year);
+    if (!annual || annual.revenue <= 0) continue;
+    const from = (year - 1) * 12;
+    let heads = 0;
+    for (let i = from; i < from + 12; i++) heads = Math.max(heads, at(model.headcount.total, i));
+    if (heads <= 0) continue;
+
+    const perHead = annual.revenue / heads;
+    if (perHead > ABSOLUTE_REVENUE_PER_HEAD) {
+      add({
+        id: `revenue-per-employee-implausible-y${year}`,
+        severity: "blocking",
+        title: `Year ${year} bills ${money(perHead)} for every person on the payroll`,
+        detail: `${money(annual.revenue)} of revenue against ${heads.toFixed(1)} people. Somebody has to sell, make and deliver that, and this plan does not say who.`,
+        remedy: "Grow the headcount with the work, or reduce what the model says the business sells.",
+        anchor: "/intake/team",
       });
       break;
     }
+
+    const band = benchmark.revenuePerEmployee;
+    if (band && perHead > band.high) {
+      add({
+        id: `revenue-per-employee-out-of-band-y${year}`,
+        severity: "warning",
+        title: `Year ${year} revenue per employee is above the industry band`,
+        detail: `${money(perHead)} against a ${benchmark.label} band topping out at ${money(band.high)}. Source: ${benchmark.sourceLabel}, ${benchmark.vintage}.`,
+        remedy: "Show what makes this business more productive per head than its sector, or add the people.",
+        anchor: "/intake/team",
+      });
+      break;
+    }
+  }
+
+  // Nobody gets a raise for five years.
+  const horizonLongEnough = a.company.horizonMonths > 24;
+  const noRaises =
+    a.payroll.annualSalaryInflation === 0 &&
+    a.roles.length > 0 &&
+    a.roles.every((r) => (r.annualRaiseRate ?? 0) === 0);
+  if (horizonLongEnough && noRaises) {
+    add({
+      id: "payroll-flat",
+      severity: "warning",
+      title: "No one is paid more in year five than in year one",
+      detail:
+        "Every salary in the model is held flat for the whole horizon. Wages rise, and a plan that assumes they do not is understating its own costs.",
+      remedy: "Set an annual raise on the payroll block, or say why these roles are fixed.",
+      anchor: "/intake/team",
+    });
+  }
+
+  // The model outruns the market the plan itself claims.
+  const marketCheck = ctx.marketModelCheck;
+  if (marketCheck && marketCheck.status === "checked" && marketCheck.ratio > 1.25) {
+    const severe = marketCheck.ratio > 2 && purpose !== "internal";
+    add({
+      id: "revenue-exceeds-servable-market",
+      severity: severe ? "blocking" : "warning",
+      title: `Year ${marketCheck.year} revenue is ${marketCheck.ratio.toFixed(1)}× the market this plan says it can serve`,
+      detail: `The model projects ${money(marketCheck.projectedRevenue)} while the obtainable share in the market section comes to ${money(marketCheck.obtainableRevenue)}. One of the two is wrong, and a reader will find the contradiction before anything else.`,
+      remedy: "Reconcile them: either the market is larger than stated, or the share is, or the forecast is too high.",
+      anchor: "/market/sizing",
+    });
   }
 
   // A driver held constant for years reads as unmodelled.

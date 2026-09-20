@@ -246,3 +246,173 @@ describe("benchmark gross margin — the basis of the comparison", () => {
     expect(bandIds(direct)).toEqual(bandIds(overhead));
   });
 });
+
+/* ==========================================================================
+   Capacity and scale.
+   --------------------------------------------------------------------------
+   The rules that stop a plan reaching $4.3 trillion. The curve makes that hard
+   to do by accident; these make it hard to do on purpose, because an author
+   told to declare a ceiling can declare a ceiling of a billion.
+   ========================================================================== */
+describe("capacity", () => {
+  const subscription = saasPlan.revenueStreams?.[0];
+  if (!subscription) throw new Error("the SaaS fixture must carry a stream to vary");
+
+  /** The SaaS fixture with its stream's growth fields replaced. */
+  const withStream = (stream: Record<string, unknown>): AssumptionsInput => ({
+    ...saasPlan,
+    revenueStreams: [{ ...subscription, ...stream }],
+  });
+
+  it("blocks a stream that declares no limit at all", () => {
+    const result = run(
+      withStream({ growth: { shape: "unbounded", monthlyRate: 0.05 }, customerCeiling: undefined }),
+      cleanContext,
+    );
+    const finding = result.findings.find((f) => f.id.startsWith("growth-declared-unbounded"));
+    expect(finding, `got: ${ids(result).join(", ")}`).toBeDefined();
+    expect(finding!.severity).toBe("blocking");
+    expect(result.canExport).toBe(false);
+  });
+
+  it("lets a stream that states its capacity through", () => {
+    const result = run(withStream({}), cleanContext);
+    expect(ids(result).some((id) => id.startsWith("growth-declared-unbounded"))).toBe(false);
+  });
+
+  it("says so when the stated ceiling is nowhere near being reached", () => {
+    // The loophole: satisfy the field with a number so large it constrains
+    // nothing. The ceiling is then not a ceiling, and the plan says nothing.
+    const result = run(
+      withStream({
+        growth: { shape: "saturating", monthlyRate: 0.05, ceiling: 4_000, terminalAnnualRate: 0 },
+        customerCeiling: 500_000,
+      }),
+      cleanContext,
+    );
+    const finding = result.findings.find((f) => f.id.startsWith("capacity-never-approached"));
+    expect(finding, `got: ${ids(result).join(", ")}`).toBeDefined();
+    expect(finding!.severity).toBe("warning");
+  });
+
+  it("treats perpetual capacity growth as the same defect wearing a different field", () => {
+    const warned = run(
+      withStream({
+        growth: { shape: "saturating", monthlyRate: 0.05, ceiling: 46, terminalAnnualRate: 0.2 },
+      }),
+      cleanContext,
+    );
+    expect(ids(warned).some((id) => id.startsWith("terminal-growth-implausible"))).toBe(true);
+    expect(warned.canExport).toBe(true);
+
+    const blocked = run(
+      withStream({
+        growth: { shape: "saturating", monthlyRate: 0.05, ceiling: 46, terminalAnnualRate: 0.45 },
+      }),
+      cleanContext,
+    );
+    const finding = blocked.findings.find((f) => f.id.startsWith("terminal-growth-implausible"));
+    expect(finding!.severity).toBe("blocking");
+  });
+});
+
+describe("scale", () => {
+  it("blocks a business that bills more per head than anyone could deliver", () => {
+    // One owner, no other staff, against a model that sells millions.
+    const plan: AssumptionsInput = {
+      ...saasPlan,
+      roles: [{ id: "owner", title: "Owner", annualSalary: 120_000, isOwner: true }],
+      revenueStreams: [
+        {
+          id: "subs", name: "Subscriptions", kind: "subscription",
+          newCustomersMonth1: 400, monthlyChurnRate: 0.01,
+          pricePerCustomerPerMonth: 900, cogsPercent: 0.2,
+          growth: { shape: "saturating", monthlyRate: 0.05, ceiling: 900, terminalAnnualRate: 0 },
+          customerCeiling: 30_000,
+        },
+      ],
+    };
+    const result = run(plan, cleanContext);
+    const finding = result.findings.find((f) => f.id.startsWith("revenue-per-employee-implausible"));
+    expect(finding, `got: ${ids(result).join(", ")}`).toBeDefined();
+    expect(finding!.severity).toBe("blocking");
+    expect(result.canExport).toBe(false);
+  });
+
+  it("leaves a plausibly-staffed plan alone", () => {
+    expect(
+      ids(run(saasPlan, cleanContext)).some((id) => id.startsWith("revenue-per-employee-implausible")),
+    ).toBe(false);
+  });
+
+  it("warns against the sourced band where one exists", () => {
+    // Only two of the twenty-one benchmarks carry this band, and the rule is
+    // deliberately silent for the rest rather than inventing nineteen more.
+    expect(getBenchmark("saas").revenuePerEmployee).toBeDefined();
+    expect(getBenchmark("laundromat").revenuePerEmployee).toBeUndefined();
+  });
+
+  it("notices when nobody is paid more in year five than in year one", () => {
+    const result = run(saasPlan, cleanContext);
+    expect(ids(result)).toContain("payroll-flat");
+
+    const withRaises = run(
+      { ...saasPlan, payroll: { payrollTaxRate: 0.0765, benefitsRate: 0.12, annualSalaryInflation: 0.03 } },
+      cleanContext,
+    );
+    expect(ids(withRaises)).not.toContain("payroll-flat");
+  });
+
+  it("reports the worst year of growth, not the first", () => {
+    // It used to break on the earliest offender, sending an author to the
+    // wrong screen when the trouble was three years later.
+    const result = run(saasPlan, cleanContext);
+    const growth = result.findings.find((f) => f.id.startsWith("growth-unsupported-y"));
+    if (!growth) return; // The fixture may be calm throughout.
+    const model = buildModel(saasPlan);
+    const metrics = computeMetrics(model);
+    const worst = metrics.revenueGrowthByYear
+      .filter((g): g is { year: number; growth: number } => g.growth !== null)
+      .reduce((a, b) => (b.growth > a.growth ? b : a));
+    expect(growth.id).toBe(`growth-unsupported-y${worst.year}`);
+  });
+});
+
+describe("the market the plan says it can serve", () => {
+  const checked = (ratio: number) => ({
+    status: "checked" as const,
+    year: 3,
+    projectedRevenue: 1_000_000 * ratio,
+    obtainableRevenue: 1_000_000,
+    ratio,
+    overruns: ratio > 1,
+    understates: ratio < 1,
+  });
+
+  it("ignores a model that fits inside its market", () => {
+    expect(ids(run(saasPlan, { ...cleanContext, marketModelCheck: checked(0.9) }))).not.toContain(
+      "revenue-exceeds-servable-market",
+    );
+  });
+
+  it("warns when the model slightly outruns it", () => {
+    const result = run(saasPlan, { ...cleanContext, marketModelCheck: checked(1.5) });
+    const finding = result.findings.find((f) => f.id === "revenue-exceeds-servable-market");
+    expect(finding!.severity).toBe("warning");
+  });
+
+  it("blocks when the model outruns it by more than double, for an outside reader", () => {
+    const result = run(saasPlan, { ...cleanContext, marketModelCheck: checked(3) });
+    const finding = result.findings.find((f) => f.id === "revenue-exceeds-servable-market");
+    expect(finding!.severity).toBe("blocking");
+
+    const internal = run(saasPlan, {
+      ...cleanContext,
+      purpose: "internal" as const,
+      marketModelCheck: checked(3),
+    });
+    expect(
+      internal.findings.find((f) => f.id === "revenue-exceeds-servable-market")!.severity,
+    ).toBe("warning");
+  });
+});
