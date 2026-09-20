@@ -79,14 +79,14 @@ jobs:
           TAG: ${{ github.event.inputs.imageTag || github.sha }}
         run: |
           set -euo pipefail
-          IMAGE="$REGISTRY/venturally:$TAG"
+          IMAGE="$REGISTRY/venturelly:$TAG"
           docker build \
             --build-arg NEXT_PUBLIC_SITE_URL="https://${DOMAIN_NAME}" \
             --tag "$IMAGE" \
-            --tag "$REGISTRY/venturally:latest" \
+            --tag "$REGISTRY/venturelly:latest" \
             .
           docker push "$IMAGE"
-          docker push "$REGISTRY/venturally:latest"
+          docker push "$REGISTRY/venturelly:latest"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Deploy the stack
@@ -95,7 +95,7 @@ jobs:
           IMAGE_TAG: ${{ steps.image.outputs.tag }}
         run: |
           npm ci
-          npx cdk deploy VenturallyCertificate VenturallySite \
+          npx cdk deploy VenturellyCertificate VenturellySite \
             --require-approval never \
             --context domainName="${DOMAIN_NAME}" \
             --context imageTag="${IMAGE_TAG}"
@@ -103,15 +103,15 @@ jobs:
       - name: Wait for the service to stabilise
         run: |
           aws ecs wait services-stable \
-            --cluster "$(aws cloudformation describe-stacks --stack-name VenturallySite \
+            --cluster "$(aws cloudformation describe-stacks --stack-name VenturellySite \
                  --query "Stacks[0].Outputs[?OutputKey=='ClusterName'].OutputValue" --output text)" \
-            --services "$(aws cloudformation describe-stacks --stack-name VenturallySite \
+            --services "$(aws cloudformation describe-stacks --stack-name VenturellySite \
                  --query "Stacks[0].Outputs[?OutputKey=='ServiceName'].OutputValue" --output text)"
 
       - name: Invalidate the edge cache
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id "$(aws cloudformation describe-stacks --stack-name VenturallySite \
+            --distribution-id "$(aws cloudformation describe-stacks --stack-name VenturellySite \
                  --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" --output text)" \
             --paths "/*"
 
