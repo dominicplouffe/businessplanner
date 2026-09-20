@@ -1,0 +1,283 @@
+// Venturally data model.
+//
+// PORTABILITY: every model here is deliberately written to run unchanged on
+// SQLite (local development and tests) and PostgreSQL (production):
+//   - no native enums          -> status/kind fields are String, constrained in Zod
+//   - no scalar lists          -> collections are relations or JSON-encoded text
+//   - no database-specific column types
+//
+// The one thing that cannot be portable is the provider line below: Prisma
+// rejects env() there. So it is committed as sqlite (the common case) and the
+// production build rewrites it via `pnpm db:provider postgresql`. Nothing else
+// in this file changes between environments.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+/* ========================================================================== */
+/* Auth — the shape Better Auth expects                                       */
+/* ========================================================================== */
+
+model User {
+  id            String    @id
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions   Session[]
+  accounts   Account[]
+  members    WorkspaceMember[]
+  plans      Plan[]            @relation("PlanCreatedBy")
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  userId                String
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  idToken               String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+/* ========================================================================== */
+/* Workspaces                                                                 */
+/* ========================================================================== */
+
+/// Every plan belongs to a workspace from day one, even for a solo user. The
+/// immigration segment sells through attorneys and the advisory segment through
+/// firms, so multi-client tenancy has to be in the data model from the start —
+/// retrofitting it later would mean migrating every plan.
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  /// "personal" | "firm"
+  kind      String   @default("personal")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members WorkspaceMember[]
+  plans   Plan[]
+
+  @@map("workspace")
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  /// "owner" | "admin" | "member" | "viewer"
+  role        String   @default("owner")
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_member")
+}
+
+/* ========================================================================== */
+/* Plans                                                                      */
+/* ========================================================================== */
+
+model Plan {
+  id          String   @id @default(cuid())
+  workspaceId String
+  createdById String
+  title       String
+  /// Business name as it appears in the document.
+  companyName String   @default("")
+  industryKey String   @default("other")
+  /// "sba-loan" | "investor" | "immigration" | "internal"
+  purpose     String   @default("internal")
+  /// "draft" | "intake" | "generating" | "ready" | "archived"
+  status      String   @default("draft")
+
+  /// Which intake step the user last completed, so the wizard is resumable.
+  intakeStep       Int     @default(0)
+  intakeComplete   Boolean @default(false)
+
+  /// The full Assumptions object (Zod-validated in src/lib/finance/types.ts),
+  /// JSON-encoded. Stored as text so the column type is identical on SQLite and
+  /// Postgres. Never queried by field — the engine always loads it whole.
+  assumptionsJson  String  @default("{}")
+
+  /// Provenance register: dotted assumption path -> {provenance, source, note}.
+  registryJson     String  @default("{}")
+
+  /// Free-form answers captured at intake that inform narrative but are not
+  /// engine inputs (positioning, differentiators, team background).
+  contextJson      String  @default("{}")
+
+  /// Entitlement. Set when the one-time unlock is paid; gates export and share.
+  unlockedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User          @relation("PlanCreatedBy", fields: [createdById], references: [id])
+  sections  PlanSection[]
+  versions  PlanVersion[]
+  citations Citation[]
+  shares    ShareLink[]
+
+  @@index([workspaceId])
+  @@index([createdById])
+  @@map("plan")
+}
+
+/// One written section of the document. Content is TipTap JSON once the editor
+/// lands; until then it holds plain text.
+model PlanSection {
+  id      String @id @default(cuid())
+  planId  String
+  /// Stable identifier, e.g. "executive-summary". Not a DB enum so new sections
+  /// do not require a migration.
+  key     String
+  title   String
+  /// Display order.
+  position Int    @default(0)
+  /// "empty" | "generating" | "draft" | "edited" | "approved"
+  status  String @default("empty")
+  /// TipTap JSON document, encoded as text.
+  contentJson String @default("")
+  /// Plain-text mirror, used by the consistency checker and for search.
+  contentText String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, key])
+  @@index([planId])
+  @@map("plan_section")
+}
+
+/// A point-in-time snapshot. Regeneration takes one before it writes, so no
+/// edit is ever overwritten without a way back — which is the failure the
+/// incumbent's own users complain about.
+model PlanVersion {
+  id        String   @id @default(cuid())
+  planId    String
+  label     String
+  /// "manual" | "regeneration" | "intake" | "import"
+  reason    String   @default("manual")
+  /// Complete plan state at the time of the snapshot.
+  snapshotJson String
+  createdAt DateTime @default(now())
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+  @@map("plan_version")
+}
+
+/// Every market claim's source. Separate table rather than embedded JSON so the
+/// sources appendix, the "zero uncited claims" gate and per-claim re-validation
+/// can all query it directly.
+model Citation {
+  id        String   @id @default(cuid())
+  planId    String
+  sectionKey String?
+  label     String
+  url       String?
+  publisher String?
+  /// Publication or retrieval date, ISO yyyy-mm-dd. Undated is not a citation.
+  sourceDate String
+  /// The claim this supports, verbatim.
+  claim     String   @default("")
+  createdAt DateTime @default(now())
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+  @@map("citation")
+}
+
+/// Tokenised read-only access with view tracking — the DocSend behaviour no
+/// plan tool currently has.
+model ShareLink {
+  id        String    @id @default(cuid())
+  planId    String
+  token     String    @unique
+  label     String    @default("")
+  expiresAt DateTime?
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  plan  Plan        @relation(fields: [planId], references: [id], onDelete: Cascade)
+  views ShareView[]
+
+  @@index([planId])
+  @@map("share_link")
+}
+
+model ShareView {
+  id          String   @id @default(cuid())
+  shareLinkId String
+  viewedAt    DateTime @default(now())
+  ipHash      String?
+  userAgent   String?
+  /// Seconds spent, updated by heartbeat.
+  secondsRead Int      @default(0)
+
+  shareLink ShareLink @relation(fields: [shareLinkId], references: [id], onDelete: Cascade)
+
+  @@index([shareLinkId])
+  @@map("share_view")
+}

@@ -140,7 +140,7 @@
 
   /* Status — always shipped with an icon and a label, never colour alone */
   --status-good: #0b7a3e;
-  --status-warning: #a8670a;
+  --status-warning: #9c5f09;
   --status-serious: #c1521f;
   --status-critical: #b3282a;
 
