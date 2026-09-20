@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GrowthCurveSchema, MONTHLY_RATE_CEILING } from "./growth";
 
 /* ==========================================================================
    Assumptions — the only user-supplied input to the model.
@@ -41,11 +42,30 @@ export type AssumptionRegistry = z.infer<typeof AssumptionRegistrySchema>;
 /* Revenue                                                                    */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The legacy per-month growth rate, now bounded.
+ *
+ * These four fields are what the curve replaces. Until they are removed they
+ * carry the same ceiling the curve does, because the schema is the only place
+ * a 50%-a-month plan can be stopped before it reaches a statement.
+ */
+const legacyMonthlyRate = z.number().min(-0.5).max(MONTHLY_RATE_CEILING).default(0);
+
 const streamBase = {
   id: z.string().min(1),
   name: z.string().min(1),
   /** 1-based month of the model horizon in which this stream first bills. */
   startMonth: z.number().int().min(1).default(1),
+  /**
+   * How this stream's volume moves — see `src/lib/finance/growth.ts`.
+   *
+   * Optional only while the legacy rate fields below still exist. A stream
+   * without one falls back to `{ shape: "unbounded" }` built from that rate,
+   * which is byte-identical arithmetic, so introducing the curve moves no
+   * existing number. `growth-declared-unbounded` is what makes that fallback
+   * unusable in a finished plan.
+   */
+  growth: GrowthCurveSchema.optional(),
   /** Fraction of this stream's revenue consumed by direct costs, when the model
    *  has no explicit unit cost. 0.3 = 70% gross margin. */
   cogsPercent: z.number().min(0).max(1).default(0),
@@ -60,7 +80,7 @@ export const RevenueStreamSchema = z.discriminatedUnion("kind", [
     kind: z.literal("subscription"),
     initialCustomers: z.number().min(0).default(0),
     newCustomersMonth1: z.number().min(0),
-    newCustomerGrowthRate: z.number().min(-1).default(0),
+    newCustomerGrowthRate: legacyMonthlyRate,
     monthlyChurnRate: z.number().min(0).max(1),
     pricePerCustomerPerMonth: z.number().min(0),
     /** Net revenue expansion on the retained base, per month. */
@@ -74,7 +94,7 @@ export const RevenueStreamSchema = z.discriminatedUnion("kind", [
     ...streamBase,
     kind: z.literal("unit-sales"),
     unitsMonth1: z.number().min(0),
-    monthlyGrowthRate: z.number().min(-1).default(0),
+    monthlyGrowthRate: legacyMonthlyRate,
     pricePerUnit: z.number().min(0),
     costPerUnit: z.number().min(0).default(0),
   }),
@@ -87,7 +107,7 @@ export const RevenueStreamSchema = z.discriminatedUnion("kind", [
     hoursPerHeadPerMonth: z.number().min(0).default(160),
     utilisation: z.number().min(0).max(1).default(0.7),
     hourlyRate: z.number().min(0),
-    headcountGrowthPerMonth: z.number().min(0).default(0),
+    headcountGrowthPerMonth: z.number().min(0).max(5).default(0),
   }),
 
   /** Traffic × conversion × ticket × open days — restaurants and retail. */
@@ -98,7 +118,7 @@ export const RevenueStreamSchema = z.discriminatedUnion("kind", [
     conversionRate: z.number().min(0).max(1),
     averageTicket: z.number().min(0),
     openDaysPerMonth: z.number().min(0).max(31).default(26),
-    monthlyGrowthRate: z.number().min(-1).default(0),
+    monthlyGrowthRate: legacyMonthlyRate,
   }),
 
   /** GMV × take rate — marketplaces and platforms. */
@@ -106,7 +126,7 @@ export const RevenueStreamSchema = z.discriminatedUnion("kind", [
     ...streamBase,
     kind: z.literal("marketplace"),
     gmvMonth1: z.number().min(0),
-    monthlyGrowthRate: z.number().min(-1).default(0),
+    monthlyGrowthRate: legacyMonthlyRate,
     takeRate: z.number().min(0).max(1),
   }),
 
@@ -125,7 +145,7 @@ export const RevenueStreamSchema = z.discriminatedUnion("kind", [
     ...streamBase,
     kind: z.literal("advertising"),
     impressionsMonth1: z.number().min(0),
-    monthlyGrowthRate: z.number().min(-1).default(0),
+    monthlyGrowthRate: legacyMonthlyRate,
     fillRate: z.number().min(0).max(1).default(0.7),
     cpm: z.number().min(0),
   }),

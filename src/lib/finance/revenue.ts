@@ -1,4 +1,5 @@
 import type { RevenueStream } from "./types";
+import { ceilingAt, projectCurve, type GrowthCurve } from "./growth";
 
 export type StreamResult = {
   id: string;
@@ -13,7 +14,39 @@ export type StreamResult = {
   volumeLabel: string;
   /** Revenue billed but not yet earned, from prepaid subscription terms. */
   deferred: number[];
+  /** The capacity in force each month, in `volumeLabel` units. Null where the
+   *  stream declares no bound — which the validator treats as a defect. */
+  ceiling: (number | null)[];
+  /** Volume as a share of that capacity. The number an operator can argue
+   *  with, and what `capacity-never-approached` reads. */
+  saturation: (number | null)[];
+  /** Billable people the revenue model implies. Only `hourly-services`, and
+   *  only so the payroll side can be checked against it rather than the test
+   *  re-deriving the arithmetic. */
+  billableHeads?: number[];
 };
+
+/**
+ * The curve a stream grows on.
+ *
+ * Falls back to the legacy rate as an explicitly `unbounded` curve, which is
+ * the same arithmetic the engine has always done. That fallback is what lets
+ * the curve be introduced without moving a number; it is also exactly what
+ * `growth-declared-unbounded` refuses to export.
+ */
+function curveFor(stream: RevenueStream): GrowthCurve {
+  if (stream.growth) return stream.growth;
+  switch (stream.kind) {
+    case "hourly-services":
+      return { shape: "linear", perMonth: stream.headcountGrowthPerMonth };
+    case "subscription":
+      return { shape: "unbounded", monthlyRate: stream.newCustomerGrowthRate };
+    case "contract":
+      return { shape: "flat" };
+    default:
+      return { shape: "unbounded", monthlyRate: stream.monthlyGrowthRate };
+  }
+}
 
 function seasonalFactor(stream: RevenueStream, month: number, startCalendarMonth: number): number {
   if (!stream.seasonality) return 1;
@@ -38,7 +71,11 @@ export function projectStream(
   const cogs = new Array<number>(horizonMonths).fill(0);
   const volume = new Array<number>(horizonMonths).fill(0);
   const deferred = new Array<number>(horizonMonths).fill(0);
+  const ceiling = new Array<number | null>(horizonMonths).fill(null);
+  const saturation = new Array<number | null>(horizonMonths).fill(null);
+  const heads = new Array<number>(horizonMonths).fill(0);
   let volumeLabel = "Units";
+  const curve = curveFor(stream);
 
   // Carried across months for the stateful models.
   let customers = 0;
@@ -56,8 +93,7 @@ export function projectStream(
       case "subscription": {
         volumeLabel = "Customers";
         if (elapsed === 0) customers = stream.initialCustomers;
-        const additions =
-          stream.newCustomersMonth1 * Math.pow(1 + stream.newCustomerGrowthRate, elapsed);
+        const additions = projectCurve(curve, stream.newCustomersMonth1, elapsed);
         // Churn applies to the base before additions; additions bill in full.
         const churned = customers * stream.monthlyChurnRate;
         customers = customers - churned + additions;
@@ -76,7 +112,7 @@ export function projectStream(
 
       case "unit-sales": {
         volumeLabel = "Units";
-        const units = stream.unitsMonth1 * Math.pow(1 + stream.monthlyGrowthRate, elapsed) * season;
+        const units = projectCurve(curve, stream.unitsMonth1, elapsed) * season;
         revenue[i] = units * stream.pricePerUnit;
         cogs[i] = units * stream.costPerUnit;
         volume[i] = units;
@@ -85,8 +121,8 @@ export function projectStream(
 
       case "hourly-services": {
         volumeLabel = "Billable hours";
-        if (elapsed === 0) billableHeads = stream.billableHeadcount;
-        else billableHeads += stream.headcountGrowthPerMonth;
+        billableHeads = projectCurve(curve, stream.billableHeadcount, elapsed);
+        heads[i] = billableHeads;
         const hours = billableHeads * stream.hoursPerHeadPerMonth * stream.utilisation * season;
         revenue[i] = hours * stream.hourlyRate;
         volume[i] = hours;
@@ -95,9 +131,11 @@ export function projectStream(
 
       case "retail-footfall": {
         volumeLabel = "Transactions";
-        const growth = Math.pow(1 + stream.monthlyGrowthRate, elapsed);
-        const transactions =
-          stream.dailyTraffic * stream.conversionRate * stream.openDaysPerMonth * growth * season;
+        // The curve carries the whole transaction count, so the ceiling is
+        // stated in covers or tickets a month — the seats-times-turns number an
+        // owner already knows — rather than in a rate nobody can picture.
+        const perMonth = stream.dailyTraffic * stream.conversionRate * stream.openDaysPerMonth;
+        const transactions = projectCurve(curve, perMonth, elapsed) * season;
         revenue[i] = transactions * stream.averageTicket;
         volume[i] = transactions;
         break;
@@ -105,7 +143,7 @@ export function projectStream(
 
       case "marketplace": {
         volumeLabel = "GMV";
-        const gmv = stream.gmvMonth1 * Math.pow(1 + stream.monthlyGrowthRate, elapsed) * season;
+        const gmv = projectCurve(curve, stream.gmvMonth1, elapsed) * season;
         revenue[i] = gmv * stream.takeRate;
         volume[i] = gmv;
         break;
@@ -133,8 +171,7 @@ export function projectStream(
 
       case "advertising": {
         volumeLabel = "Impressions";
-        const impressions =
-          stream.impressionsMonth1 * Math.pow(1 + stream.monthlyGrowthRate, elapsed) * season;
+        const impressions = projectCurve(curve, stream.impressionsMonth1, elapsed) * season;
         const sold = impressions * stream.fillRate;
         revenue[i] = (sold / 1000) * stream.cpm;
         volume[i] = sold;
@@ -142,11 +179,30 @@ export function projectStream(
       }
     }
 
+    // What capacity this month was, and how much of it is being used. Written
+    // once here rather than in seven branches, because every kind measures it
+    // against the same `volume` line.
+    const capacity = ceilingAt(curve, elapsed);
+    ceiling[i] = capacity;
+    saturation[i] = capacity !== null && capacity > 0 ? (volume[i] ?? 0) / capacity : null;
+
     // A percentage COGS applies to any stream that has no explicit unit cost.
     if (cogs[i] === 0 && stream.cogsPercent > 0) {
       cogs[i] = (revenue[i] ?? 0) * stream.cogsPercent;
     }
   }
 
-  return { id: stream.id, name: stream.name, kind: stream.kind, revenue, cogs, volume, volumeLabel, deferred };
+  return {
+    id: stream.id,
+    name: stream.name,
+    kind: stream.kind,
+    revenue,
+    cogs,
+    volume,
+    volumeLabel,
+    deferred,
+    ceiling,
+    saturation,
+    ...(stream.kind === "hourly-services" ? { billableHeads: heads } : {}),
+  };
 }

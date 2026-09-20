@@ -40,6 +40,48 @@
    Pure, no I/O, no dependency on the rest of the engine.
    ========================================================================== */
 
+import { z } from "zod";
+
+/**
+ * The outer bound on any monthly growth rate.
+ *
+ * 25% a month is 1,355% a year. Nothing defensible sits above it, and putting
+ * the limit in the schema is the answer to "50%" that no validator can be
+ * talked out of — the reported plan was 50% a month, which the old schema
+ * accepted without complaint because every rate meaning *growth* carried only
+ * a lower bound while every rate meaning a *share* was bounded both ways.
+ */
+export const MONTHLY_RATE_CEILING = 0.25;
+
+const monthlyRate = z.number().min(-0.5).max(MONTHLY_RATE_CEILING);
+
+/**
+ * What the ceiling itself does each year once the business is mature — price
+ * inflation, a market that is itself growing.
+ *
+ * Defaults to zero rather than to a nominal-GDP figure, because a plan that
+ * says "no growth" and silently receives 3% a year is lying to its author.
+ */
+const terminalAnnualRate = z.number().min(-0.25).max(0.5).default(0);
+
+export const GrowthCurveSchema = z.discriminatedUnion("shape", [
+  z.object({ shape: z.literal("flat") }),
+  z.object({
+    shape: z.literal("linear"),
+    perMonth: z.number().min(0),
+    max: z.number().positive().optional(),
+  }),
+  z.object({
+    shape: z.literal("saturating"),
+    monthlyRate,
+    // Required, and that is the whole point: there is no half-specified
+    // ceiling, and therefore no way to declare a bound and then not have one.
+    ceiling: z.number().positive(),
+    terminalAnnualRate,
+  }),
+  z.object({ shape: z.literal("unbounded"), monthlyRate }),
+]);
+
 /**
  * How a stream's volume moves over the horizon.
  *
@@ -50,11 +92,8 @@
  * so the validator can name it back — "this stream declares unbounded growth"
  * — rather than inferring intent from an absent field.
  */
-export type GrowthCurve =
-  | { shape: "flat" }
-  | { shape: "linear"; perMonth: number; max?: number }
-  | { shape: "saturating"; monthlyRate: number; ceiling: number; terminalAnnualRate: number }
-  | { shape: "unbounded"; monthlyRate: number };
+export type GrowthCurve = z.infer<typeof GrowthCurveSchema>;
+export type GrowthCurveInput = z.input<typeof GrowthCurveSchema>;
 
 /** The `B` in `v(t) = K/(1 + A·B^t)`, or null when the curve does not need it. */
 function saturatingBase(v0: number, ceiling: number, monthlyRate: number): number | null {
