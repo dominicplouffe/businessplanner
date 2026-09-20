@@ -1,20 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowRight, ClipboardCheck, LineChart, Pencil } from "lucide-react";
+import { ArrowRight, ClipboardCheck, LineChart, Pencil, Target } from "lucide-react";
 import { AppPageHeader } from "@/components/app/page-header";
 import { ButtonLink } from "@/components/ui/button";
 import { requireUser, getOrCreateWorkspace } from "@/lib/session";
 import { getPlan, parseAssumptions, PLAN_SECTIONS } from "@/lib/plans";
-import { buildModel } from "@/lib/finance/engine";
-import { computeMetrics } from "@/lib/finance/metrics";
-import { validateModel } from "@/lib/finance/validate";
 import { formatCurrency, formatMultiple, formatPercent } from "@/lib/finance/format";
 import { getBenchmark } from "@/lib/finance/benchmarks";
-import { buildValidationContext } from "@/lib/review/context";
-import { buildModelIndex, checkPlan } from "@/lib/ai/consistency";
-import { scorePlan } from "@/lib/review/rubric";
-import type { PlanPurpose } from "@/lib/review/rubric";
+import { assembleReview } from "@/lib/review/assemble";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Plan" };
@@ -48,36 +42,7 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
     );
   }
 
-  const model = buildModel(assumptions);
-  const metrics = computeMetrics(model);
-  // Built through the shared helper so this page, the financials page and the
-  // review page all reach the same verdict on the same plan — including the
-  // narrative reconciliation, which is what the validator's own check needs.
-  const purpose = plan.purpose as PlanPurpose;
-  const sectionTexts = PLAN_SECTIONS.map((section) => ({
-    key: section.key,
-    title: section.title,
-    text: plan.sections.find((s) => s.key === section.key)?.contentText ?? "",
-  }));
-  const consistency = checkPlan(
-    sectionTexts,
-    buildModelIndex(model, metrics, assumptions),
-  );
-  const validation = validateModel(
-    model,
-    metrics,
-    buildValidationContext({ purpose, assumptions, consistency }),
-  );
-  const readiness = scorePlan({
-    purpose,
-    assumptions,
-    model,
-    metrics,
-    validation,
-    consistency,
-    sectionsWritten: sectionTexts.filter((s) => s.text.trim().length > 0).map((s) => s.key),
-    sectionsExpected: sectionTexts.map((s) => s.key),
-  });
+  const { model, metrics, validation, consistency, readiness } = assembleReview(plan, assumptions);
 
   const writtenCount = plan.sections.filter((s) => s.contentText.trim().length > 0).length;
 
@@ -99,6 +64,10 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
             <ButtonLink href={`/plans/${plan.id}/financials`} variant="secondary">
               <LineChart aria-hidden className="size-4" />
               Financials
+            </ButtonLink>
+            <ButtonLink href={`/plans/${plan.id}/market`} variant="secondary">
+              <Target aria-hidden className="size-4" />
+              Market
             </ButtonLink>
             <ButtonLink href={`/plans/${plan.id}/review`} variant="secondary">
               <ClipboardCheck aria-hidden className="size-4" />
@@ -221,7 +190,7 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
                     href={`/plans/${plan.id}/sections/${section.key}`}
                     className="flex items-center gap-3 rounded-sm border border-hairline px-4 py-3 transition-colors hover:border-strong"
                   >
-                    <span className="numeric text-xs text-brass-600">
+                    <span className="numeric text-xs text-marker">
                       {String(index + 1).padStart(2, "0")}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm text-secondary">{section.title}</span>

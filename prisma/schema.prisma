@@ -162,6 +162,16 @@ model Plan {
   /// engine inputs (positioning, differentiators, team background).
   contextJson      String  @default("{}")
 
+  /// Bottom-up market sizing inputs (MarketSizingSchema in
+  /// src/lib/market/sizing.ts). Its own column rather than a key inside
+  /// contextJson: different shape, different write path, and merging shapes is
+  /// how the intake autosave race was introduced the first time.
+  marketJson       String  @default("{}")
+
+  /// AI-disruption resilience answers (ResilienceSchema in
+  /// src/lib/market/resilience.ts). The March-2026 lender question.
+  resilienceJson   String  @default("{}")
+
   /// Entitlement. Set when the one-time unlock is paid; gates export and share.
   unlockedAt       DateTime?
 
@@ -173,6 +183,7 @@ model Plan {
   sections  PlanSection[]
   versions  PlanVersion[]
   citations Citation[]
+  competitors Competitor[]
   shares    ShareLink[]
 
   @@index([workspaceId])
@@ -247,6 +258,38 @@ model Citation {
 
   @@index([planId])
   @@map("citation")
+}
+
+/// A named competitor with dated price evidence. A separate table because the
+/// blocking check counts them and the matrix sorts them — "three named
+/// competitors with a URL and a dated price point each" has to be queryable,
+/// not a paragraph someone wrote.
+model Competitor {
+  id          String  @id @default(cuid())
+  planId      String
+  name        String
+  url         String?
+  /// One line on where they sit in the market.
+  positioning String  @default("")
+  /// The price as observed, in the seller's own words, e.g. "$29/user/month".
+  priceLabel  String  @default("")
+  /// When that price was observed, ISO yyyy-mm-dd. Undated evidence is not
+  /// evidence, which is why this is nullable and checked rather than assumed.
+  priceDate   String?
+  strengths   String  @default("")
+  weaknesses  String  @default("")
+  /// "owner" when the author entered it, "research" when a grounded search
+  /// found it. Rendered, because the distinction is the trust signal.
+  origin      String  @default("owner")
+  /// Display order.
+  position    Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+  @@map("competitor")
 }
 
 /// Tokenised read-only access with view tracking — the DocSend behaviour no

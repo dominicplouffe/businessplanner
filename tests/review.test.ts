@@ -106,13 +106,57 @@ describe("scorePlan", () => {
   });
 
   it("does not claim sourcing it has not got", () => {
-    // Until grounded research lands, the evidence dimension must say so rather
-    // than score a plan as sourced.
+    // With no market evidence at all, every evidence check that depends on it
+    // must fail and say what is absent — never pass by default.
     const readiness = scorePlan(inputFor());
     const evidence = readiness.dimensions.find((d) => d.key === "evidence")!;
-    const sourcing = evidence.checks.find((c) => c.label.match(/dated source/))!;
+
+    const sourcing = evidence.checks.find((c) => c.label.match(/carries a source/))!;
     expect(sourcing.passed).toBe(false);
-    expect(sourcing.detail).toMatch(/not built yet/);
+    expect(sourcing.detail).toMatch(/No sources recorded/);
+
+    const named = evidence.checks.find((c) => c.label.match(/Three competitors/))!;
+    expect(named.passed).toBe(false);
+
+    const bottomUp = evidence.checks.find((c) => c.label.match(/ground up/))!;
+    expect(bottomUp.passed).toBe(false);
+  });
+
+  it("credits a market section that is actually evidenced", () => {
+    const readiness = scorePlan(
+      inputFor(restaurantPlan, "sba-loan", {
+        market: {
+          sizingComplete: true,
+          competitorCount: 4,
+          evidencedCompetitorCount: 3,
+          citationCount: 5,
+          followableCitationCount: 5,
+          uncitedFigureCount: 0,
+        },
+      }),
+    );
+    const evidence = readiness.dimensions.find((d) => d.key === "evidence")!;
+    expect(evidence.checks.filter((c) => c.passed).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("will not call a source followable when it has no link or no date", () => {
+    const readiness = scorePlan(
+      inputFor(restaurantPlan, "sba-loan", {
+        market: {
+          sizingComplete: true,
+          competitorCount: 3,
+          evidencedCompetitorCount: 3,
+          citationCount: 4,
+          followableCitationCount: 2,
+          uncitedFigureCount: 0,
+        },
+      }),
+    );
+    const sourcing = readiness.dimensions
+      .find((d) => d.key === "evidence")!
+      .checks.find((c) => c.label.match(/carries a source/))!;
+    expect(sourcing.passed).toBe(false);
+    expect(sourcing.detail).toMatch(/cannot be followed/);
   });
 
   it("never scores above 100 or below 0", () => {
@@ -209,19 +253,58 @@ describe("buildValidationContext", () => {
     expect(buildValidationContext({ purpose: "sba-loan", assumptions }).sbaProgramme).toBe("7a-small");
   });
 
-  it("passes the unreconciled count through only once figures have been checked", () => {
-    expect(buildValidationContext({ purpose: "sba-loan", assumptions }).unreconciledFigureCount)
-      .toBeUndefined();
+  it("passes the figure counts through only once figures have been checked", () => {
+    const bare = buildValidationContext({ purpose: "sba-loan", assumptions });
+    expect(bare.unreconciledFigureCount).toBeUndefined();
+    expect(bare.uncitedStatisticCount).toBeUndefined();
+  });
 
+  it("separates a contradiction of the model from an outside claim with no source", () => {
+    // The remedies differ: one is a wrong number, the other is a missing
+    // source, so the validator is told which it is rather than handed a total.
     const model = buildModel(assumptions);
     const index = buildModelIndex(model, computeMetrics(model), assumptions);
-    const consistency = checkPlan(
-      [{ key: "market", title: "Market", text: "Revenue of $9,400,000." }],
+    const revenue = model.annual[0]!.revenue;
+
+    const contradiction = checkPlan(
+      [
+        {
+          key: "financials",
+          title: "Financial plan",
+          text: `Revenue of $${Math.round(revenue * 1.03).toLocaleString("en-US")}.`,
+        },
+      ],
       index,
     );
-    expect(
-      buildValidationContext({ purpose: "sba-loan", assumptions, consistency })
-        .unreconciledFigureCount,
-    ).toBe(1);
+    const ctxA = buildValidationContext({ purpose: "sba-loan", assumptions, consistency: contradiction });
+    expect(ctxA.unreconciledFigureCount).toBe(1);
+    expect(ctxA.uncitedStatisticCount).toBe(0);
+
+    const outsideClaim = checkPlan(
+      [{ key: "market", title: "Market", text: "The category is worth $4,200,000,000." }],
+      index,
+    );
+    const ctxB = buildValidationContext({ purpose: "sba-loan", assumptions, consistency: outsideClaim });
+    expect(ctxB.unreconciledFigureCount).toBe(0);
+    expect(ctxB.uncitedStatisticCount).toBe(1);
+  });
+
+  it("reads the market evidence the page holds", () => {
+    const ctx = buildValidationContext({
+      purpose: "sba-loan",
+      assumptions,
+      market: {
+        sizing: { populationCount: 24_000, qualifiedShare: 0.3, annualSpendPerCustomer: 400, targetShare: 0.05 },
+        competitors: [
+          { url: "https://a.example", priceDate: "2026-09-01" },
+          { url: "https://b.example", priceDate: "2026-09-01" },
+          { url: "https://c.example", priceDate: null },
+        ],
+      },
+    });
+    expect(ctx.hasBottomUpMarketSizing).toBe(true);
+    expect(ctx.competitorCount).toBe(3);
+    // Only two carry both a link and a date, so the evidence bar is not met.
+    expect(ctx.competitorsHaveDatedEvidence).toBe(false);
   });
 });

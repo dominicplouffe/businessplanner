@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardCheck, FileText, LayoutDashboard, LineChart, Plus } from "lucide-react";
+import { ClipboardCheck, Cpu, FileText, LayoutDashboard, LineChart, Plus, Target } from "lucide-react";
 import { Logo } from "@/components/marketing/logo";
 import { UserMenu } from "./user-menu";
 import { ButtonLink } from "@/components/ui/button";
@@ -66,6 +66,24 @@ export function AppSidebar({
                             active={pathname === `/plans/${plan.id}/financials`}
                           >
                             Financials
+                          </NavItem>
+                        </li>
+                        <li>
+                          <NavItem
+                            href={`/plans/${plan.id}/market`}
+                            icon={<Target aria-hidden className="size-4" />}
+                            active={pathname === `/plans/${plan.id}/market`}
+                          >
+                            Market
+                          </NavItem>
+                        </li>
+                        <li>
+                          <NavItem
+                            href={`/plans/${plan.id}/resilience`}
+                            icon={<Cpu aria-hidden className="size-4" />}
+                            active={pathname === `/plans/${plan.id}/resilience`}
+                          >
+                            AI disruption
                           </NavItem>
                         </li>
                         <li>

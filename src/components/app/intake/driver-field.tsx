@@ -39,7 +39,7 @@ export function DriverFieldControl({
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <Label htmlFor={id}>
           {field.label}
-          {field.required ? <span aria-hidden className="ml-1 text-brass-600">*</span> : null}
+          {field.required ? <span aria-hidden className="ml-1 text-marker">*</span> : null}
         </Label>
 
         {field.provenance ? (

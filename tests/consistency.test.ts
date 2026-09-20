@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCitedIndex,
   buildModelIndex,
   checkPlan,
   checkSection,
@@ -262,5 +263,71 @@ describe("the generated plan reconciles against its own model", () => {
     );
     expect(described).toEqual([]);
     expect(report.checkedCount).toBeGreaterThan(20);
+  });
+});
+
+describe("citations vouch for figures the model does not hold", () => {
+  /**
+   * Not every number in a plan should come from the model. "The category is
+   * worth $4.2 billion, per IBISWorld 2026" is a market fact whose right
+   * answer is a source, not a model cell. Without this the check would report
+   * a correctly cited statistic as a fabrication — punishing the exact
+   * behaviour it exists to encourage.
+   */
+  const CLAIM = "The category was worth $4,200,000,000 in 2026.";
+  const PROSE = "Industry revenue reached $4,200,000,000 last year.";
+
+  it("accepts a figure carried by a cited claim", () => {
+    const { index } = setup();
+
+    const bare = checkSection({ key: "market", title: "Market", text: PROSE }, index);
+    expect(bare.findings).toHaveLength(1);
+
+    const sourced = checkSection(
+      { key: "market", title: "Market", text: PROSE },
+      index,
+      buildCitedIndex([CLAIM]),
+    );
+    expect(sourced.findings).toEqual([]);
+    expect(sourced.sourced).toBe(1);
+    expect(sourced.reconciled).toBe(0);
+  });
+
+  it("does not let one citation vouch for a different figure", () => {
+    const { index } = setup();
+    const result = checkSection(
+      { key: "market", title: "Market", text: "Industry revenue reached $9,100,000,000 last year." },
+      index,
+      buildCitedIndex([CLAIM]),
+    );
+    expect(result.findings).toHaveLength(1);
+    expect(result.sourced).toBe(0);
+  });
+
+  it("counts sourced figures separately from reconciled ones across a plan", () => {
+    const { index, model } = setup();
+    const revenue = Math.round(model.annual[0]!.revenue);
+    const report = checkPlan(
+      [
+        {
+          key: "market",
+          title: "Market",
+          text: `Revenue reaches $${revenue.toLocaleString("en-US")} in a category worth $4,200,000,000.`,
+        },
+      ],
+      index,
+      buildCitedIndex([CLAIM]),
+    );
+    expect(report.findings).toEqual([]);
+    expect(report.reconciledCount).toBe(1);
+    expect(report.sourcedCount).toBe(1);
+    expect(report.checkedCount).toBe(2);
+  });
+
+  it("ignores a citation claim carrying no figure the checker would ever see", () => {
+    // Bare counts are not extracted from prose either, so a claim built only
+    // from one vouches for nothing. Consistent on both sides is the point.
+    expect(buildCitedIndex(["Industry conditions remain competitive."])).toEqual([]);
+    expect(buildCitedIndex(["The catchment holds 24,000 households."])).toEqual([]);
   });
 });

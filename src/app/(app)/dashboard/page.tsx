@@ -70,7 +70,7 @@ function EmptyState() {
           "The plan is written around those numbers, never over them",
         ].map((step, i) => (
           <li key={step} className="text-[0.95rem] text-secondary">
-            <span className="numeric mr-2.5 text-brass-600">{String(i + 1).padStart(2, "0")}</span>
+            <span className="numeric mr-2.5 text-marker">{String(i + 1).padStart(2, "0")}</span>
             {step}
           </li>
         ))}

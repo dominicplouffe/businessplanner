@@ -1,6 +1,8 @@
 import type { Generator, GenerationChunk, GenerationContext } from "./types";
 import { formatCurrency, formatMultiple, formatPercent } from "@/lib/finance/format";
 import { getBenchmark } from "@/lib/finance/benchmarks";
+import { computeSizing } from "@/lib/market/sizing";
+import { assessResilience } from "@/lib/market/resilience";
 
 /* ==========================================================================
    The deterministic composer.
@@ -102,24 +104,67 @@ function compose(ctx: GenerationContext): string {
       );
       break;
 
-    case "market":
+    case "market": {
       p.push(
         `The market section is built from the drivers in the financial model rather than from a published market-size figure. That is deliberate: a share-of-a-large-market claim is the most common reason a market section is dismissed.`,
       );
+      const sizing = ctx.market ? computeSizing(ctx.market.sizing, model) : null;
+      if (sizing?.complete) {
+        const som = sizing.steps.find((step) => step.key === "som");
+        p.push(
+          `The build starts from ${Math.round(ctx.market!.sizing.populationCount).toLocaleString("en-US")} ${
+            ctx.market!.sizing.populationLabel.toLowerCase() || "potential customers"
+          }, of whom ${formatPercent(ctx.market!.sizing.qualifiedShare)} are plausible buyers spending ${money(
+            ctx.market!.sizing.annualSpendPerCustomer,
+          )} a year. That gives a total addressable market of ${money(sizing.tam)}, of which ${money(
+            sizing.sam,
+          )} is serviceable and ${money(som?.value ?? sizing.som)} is realistically obtainable inside the plan horizon.`,
+        );
+        if (sizing.modelCheck.status === "checked" && sizing.modelCheck.overruns) {
+          p.push(
+            `The model and this build do not yet agree: the financial plan forecasts more revenue than the obtainable share above. One of the two needs revising before this section is defensible.`,
+          );
+        }
+      } else {
+        p.push(
+          `No bottom-up build has been recorded yet, so no market size is stated here. An unsupported figure would be worse than none.`,
+        );
+      }
       if (stream) p.push(describeDrivers(stream, currency));
       p.push(
         `At the modelled volumes, the business needs ${money(metrics.breakEven.monthlyRevenueRequired)} of revenue a month to cover its fixed costs. Whether that level of demand exists in the catchment is the question this section has to answer, and it is the assumption most worth testing before committing capital.`,
       );
       break;
+    }
 
-    case "competition":
-      p.push(
-        `A competitive analysis is only persuasive when it names real competitors with observed prices and dates. Those have not yet been gathered for this plan, and this section should not pretend otherwise.`,
-      );
+    case "competition": {
+      const competitors = ctx.market?.competitors ?? [];
+      if (competitors.length === 0) {
+        p.push(
+          `A competitive analysis is only persuasive when it names real competitors with observed prices and dates. Those have not yet been gathered for this plan, and this section should not pretend otherwise.`,
+        );
+      } else {
+        p.push(
+          `The comparison set is ${joinNames(competitors.map((c) => c.name))} — the businesses a customer would actually consider instead, rather than the largest names in the sector.`,
+        );
+        for (const competitor of competitors.slice(0, 4)) {
+          const price = competitor.priceLabel
+            ? competitor.priceDate
+              ? `${competitor.priceLabel}, observed ${competitor.priceDate}`
+              : `${competitor.priceLabel}, though the observation is undated and should be re-checked before this is filed`
+            : "no published price was found, which is itself worth noting";
+          p.push(
+            `${competitor.name}${competitor.positioning ? ` sits as ${competitor.positioning.toLowerCase()}` : ""}. Pricing: ${price}.${
+              competitor.weaknesses ? ` Where they are weak: ${competitor.weaknesses}` : ""
+            }`,
+          );
+        }
+      }
       p.push(
         `What the model does establish is the price point the business has to defend: ${describePrice(stream, currency)}. Any competitor operating below that price, or offering materially more at the same price, is a direct threat to the volumes assumed here.`,
       );
       break;
+    }
 
     case "marketing":
       p.push(
@@ -192,17 +237,43 @@ function compose(ctx: GenerationContext): string {
       }
       break;
 
-    case "ai-resilience":
+    case "ai-resilience": {
       p.push(
         `Lenders began asking small-business borrowers in 2026 how artificial intelligence might reshape their industry over the life of a long loan, and have declined applications where the business looked straightforwardly automatable. This section exists to answer that question rather than avoid it.`,
       );
-      p.push(
-        `For ${benchmark.label.toLowerCase()}, the exposure should be assessed task by task: which activities are largely information handling and therefore automatable, and which depend on physical presence, licensure, trust or local relationships. The defensible part of the business is whatever survives that sort.`,
-      );
-      p.push(
-        `The plan should also state how the business intends to adopt these tools rather than be displaced by them — where they reduce cost, and what that does to the margins modelled above.`,
-      );
+      const assessment = ctx.resilience ? assessResilience(ctx.resilience) : null;
+      if (assessment && assessment.exposure !== null) {
+        p.push(
+          `Assessed task by task and weighted by what each part costs to run, exposure stands at ${formatPercent(
+            assessment.exposure,
+          )} across ${formatPercent(assessment.coverage)} of the cost base — ${assessment.bandLabel.toLowerCase()}. The weighting matters: a handful of automatable tasks that cost almost nothing is a different business from one automatable task carrying most of the overhead.`,
+        );
+        const exposed = assessment.mostExposed.filter((t) => t.level !== "low");
+        if (exposed.length > 0) {
+          p.push(
+            `The parts most open to it are ${joinNames(exposed.map((t) => t.task.toLowerCase()))}. ${
+              exposed[0]?.rationale ?? ""
+            }`.trim(),
+          );
+        }
+        if (ctx.resilience?.moatStatement) {
+          p.push(`What is genuinely hard to automate here: ${ctx.resilience.moatStatement}`);
+        }
+        const steps = (ctx.resilience?.roadmap ?? []).filter((r) => r.action.trim().length > 0);
+        if (steps.length > 0) {
+          p.push(
+            `The response is planned rather than hoped for: ${steps
+              .map((step) => `${step.action.toLowerCase()}${step.expectedEffect ? `, to ${step.expectedEffect.toLowerCase()}` : ""}`)
+              .join("; ")}.`,
+          );
+        }
+      } else {
+        p.push(
+          `For ${benchmark.label.toLowerCase()}, the exposure should be assessed task by task: which activities are largely information handling and therefore automatable, and which depend on physical presence, licensure, trust or local relationships. The defensible part of the business is whatever survives that sort. No assessment has been recorded yet, so this section states the method rather than a conclusion.`,
+        );
+      }
       break;
+    }
 
     case "financials":
       p.push(
@@ -331,4 +402,19 @@ function weakestAssumption(ctx: GenerationContext): string {
   if (stream?.kind === "retail-footfall") return "the daily footfall";
   if (stream?.kind === "subscription") return "the churn rate";
   return "the revenue ramp";
+}
+
+/**
+ * "A, B and C" — the plain-English join, because a comma-separated list reads
+ * like output and this is meant to read like a document.
+ *
+ * Falls back to semicolons when an item contains its own "and": "bookkeeping
+ * and invoicing and reservations and front desk" is a sentence nobody can
+ * parse on first reading.
+ */
+function joinNames(names: string[]): string {
+  if (names.length === 0) return "";
+  if (names.length === 1) return names[0]!;
+  if (names.some((name) => / and /i.test(name))) return names.join("; ");
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }

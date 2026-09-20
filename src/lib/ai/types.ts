@@ -1,6 +1,8 @@
 import type { FinancialModel } from "@/lib/finance/engine";
 import type { Metrics } from "@/lib/finance/metrics";
 import type { Assumptions } from "@/lib/finance/types";
+import type { MarketSizing } from "@/lib/market/sizing";
+import type { Resilience } from "@/lib/market/resilience";
 
 /** Everything a generator is allowed to know about a plan. */
 export type GenerationContext = {
@@ -20,6 +22,29 @@ export type GenerationContext = {
   instruction?: string;
   /** Sections already written, so later ones do not contradict earlier ones. */
   written: { key: string; title: string; text: string }[];
+  /** The market page's contents, when it has any. Supplying it is what lets a
+   *  market section be written from evidence rather than from adjectives. */
+  market?: {
+    sizing: MarketSizing;
+    competitors: {
+      name: string;
+      url: string | null;
+      positioning: string;
+      priceLabel: string;
+      priceDate: string | null;
+      strengths: string;
+      weaknesses: string;
+    }[];
+    citations: {
+      label: string;
+      url: string | null;
+      publisher: string | null;
+      sourceDate: string;
+      claim: string;
+    }[];
+  };
+  /** The AI-disruption assessment, when it has been filled in. */
+  resilience?: Resilience;
 };
 
 export type GenerationChunk =

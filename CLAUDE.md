@@ -61,10 +61,22 @@ balance-sheet tie exists to catch.
 destroys the specificity that makes a plan credible. Flag the out-of-band value
 with its source and let the author justify it.
 
+**A citation is evidence; a memory is not.** Competitor prices and sources
+carry their own date column, and anything undated is excluded from the
+blocking count rather than quietly accepted. The same rule runs through the
+consistency checker: `buildCitedIndex()` lets a cited claim vouch for a figure
+the model does not hold, so citing a market statistic correctly is not
+reported as fabricating one.
+
 **Provenance is a feature.** Every driver is tagged `known` / `estimated` /
 `benchmark_default` and that tag is rendered in the output. Distinguishing "the
 owner told us this" from "we used the industry median" is the cheapest trust
 signal available.
+
+**Use the semantic token, not the ramp step.** `text-brass-600` cleared AA on
+warm paper and measured 3.46:1 on the app's dark chrome — it was in six files
+before anyone noticed. It is now `text-marker`, defined per theme. When a
+colour needs to work on both surfaces it needs a token, not a class.
 
 **Colour never carries meaning alone.** The chart palette in `globals.css` was
 validated with the dataviz skill's `validate_palette.js` against both surfaces —
@@ -120,6 +132,16 @@ findings.
 Validation context is built in one place, `src/lib/review/context.ts`. Every
 page that validates goes through it — the plan page and the review page
 reporting different verdicts on the same plan would destroy trust in both.
+
+`src/lib/research/` has the same two-implementation shape and the opposite
+default. `AnthropicResearcher` runs a live web search; `OfflineResearcher`
+returns **nothing at all** and says why. That asymmetry with the generator is
+deliberate: prose composed from figures the engine already computed invents
+nothing, but a citation cannot be composed from nothing, and a fabricated
+source in a product whose headline guarantee is zero uncited claims would be
+the worst defect in it. `keepVerifiable()` drops anything without an http URL
+and an ISO date even when the model returns it — a guarantee that depends on
+the model following an instruction is not a guarantee.
 
 Keep `SYSTEM_PROMPT` byte-stable — it carries the cache breakpoint, so a date or
 a reordered rule invalidates the cached prefix on every request. Per-plan content

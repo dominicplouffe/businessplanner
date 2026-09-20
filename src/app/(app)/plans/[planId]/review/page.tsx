@@ -8,14 +8,9 @@ import { ReadinessMeter } from "@/components/app/review/readiness-meter";
 import { Dimensions } from "@/components/app/review/dimensions";
 import { FixQueue } from "@/components/app/review/fix-queue";
 import { requireUser, getOrCreateWorkspace } from "@/lib/session";
-import { getPlan, parseAssumptions, PLAN_SECTIONS } from "@/lib/plans";
-import { buildModel } from "@/lib/finance/engine";
-import { computeMetrics } from "@/lib/finance/metrics";
-import { validateModel } from "@/lib/finance/validate";
-import { buildModelIndex, checkPlan } from "@/lib/ai/consistency";
-import { buildValidationContext } from "@/lib/review/context";
-import { scorePlan, type PlanPurpose } from "@/lib/review/rubric";
-import { buildFixQueue } from "@/lib/review/queue";
+import { getPlan, parseAssumptions } from "@/lib/plans";
+import { assembleReview } from "@/lib/review/assemble";
+import type { PlanPurpose } from "@/lib/review/rubric";
 import { getBenchmark } from "@/lib/finance/benchmarks";
 
 export const metadata: Metadata = { title: "Review" };
@@ -46,40 +41,11 @@ export default async function ReviewPage({ params }: { params: Promise<{ planId:
     );
   }
 
-  const purpose = plan.purpose as PlanPurpose;
-  const model = buildModel(assumptions);
-  const metrics = computeMetrics(model);
+  // Assembled in one place, so this page, the plan page and export can never
+  // reach different verdicts on the same plan.
+  const { purpose, consistency, readiness, queue, sections } = assembleReview(plan, assumptions);
 
-  // Reconcile every written sentence against the model before anything else:
-  // the count it produces is what makes the validator's narrative check real
-  // rather than a placeholder.
-  const index = buildModelIndex(model, metrics, assumptions);
-  const sections = PLAN_SECTIONS.map((section) => ({
-    key: section.key,
-    title: section.title,
-    text: plan.sections.find((s) => s.key === section.key)?.contentText ?? "",
-  }));
-  const consistency = checkPlan(sections, index);
-
-  const validation = validateModel(
-    model,
-    metrics,
-    buildValidationContext({ purpose, assumptions, consistency }),
-  );
-
-  const readiness = scorePlan({
-    purpose,
-    assumptions,
-    model,
-    metrics,
-    validation,
-    consistency,
-    sectionsWritten: sections.filter((s) => s.text.trim().length > 0).map((s) => s.key),
-    sectionsExpected: sections.map((s) => s.key),
-  });
-
-  const queue = buildFixQueue(plan.id, validation, consistency, assumptions.company.currency);
-  const written = readiness.dimensions.length > 0 ? consistency.checkedCount : 0;
+  const written = consistency.checkedCount;
 
   return (
     <>

@@ -57,7 +57,7 @@ export default async function SectionPage({
                       : "text-secondary hover:bg-surface-sunken hover:text-primary",
                   )}
                 >
-                  <span className="numeric text-xs text-brass-600">
+                  <span className="numeric text-xs text-marker">
                     {String(i + 1).padStart(2, "0")}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{section.title}</span>

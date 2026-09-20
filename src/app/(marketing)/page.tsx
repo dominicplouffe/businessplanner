@@ -79,7 +79,7 @@ export default function HomePage() {
             {differentiators.map((item, i) => (
               <article key={item.key} className="grid gap-6 py-12 lg:grid-cols-[auto_1fr_auto] lg:gap-12">
                 <div className="lg:w-16">
-                  <span className="numeric text-sm text-brass-600">
+                  <span className="numeric text-sm text-marker">
                     {String(i + 1).padStart(2, "0")}
                   </span>
                 </div>

@@ -113,6 +113,10 @@
   --text-tertiary: var(--color-ink-550);
   --text-inverse: var(--color-paper);
   --text-accent: var(--color-emerald-700);
+  /* The editorial brass marker — list numerals, required-field asterisks,
+     citation indices. Its own token because the ramp step that clears AA on
+     warm paper does not clear it on the app's dark chrome. */
+  --text-marker: var(--color-brass-600);
 
   --border-hairline: color-mix(in oklab, var(--color-ink-950) 12%, transparent);
   --border-strong: color-mix(in oklab, var(--color-ink-950) 24%, transparent);
@@ -164,6 +168,8 @@
     --text-tertiary: var(--color-ink-400);
     --text-inverse: var(--color-ink-950);
     --text-accent: var(--color-emerald-400);
+    /* brass-600 measures 3.46:1 on the raised dark surface; brass-500 is 5.02. */
+    --text-marker: var(--color-brass-500);
 
     --border-hairline: color-mix(in oklab, #ffffff 12%, transparent);
     --border-strong: color-mix(in oklab, #ffffff 26%, transparent);
@@ -210,6 +216,7 @@
   --text-tertiary: var(--color-ink-400);
   --text-inverse: var(--color-ink-950);
   --text-accent: var(--color-emerald-400);
+  --text-marker: var(--color-brass-500);
 
   --border-hairline: color-mix(in oklab, #ffffff 12%, transparent);
   --border-strong: color-mix(in oklab, #ffffff 26%, transparent);
@@ -252,6 +259,7 @@
   --color-tertiary: var(--text-tertiary);
   --color-inverse: var(--text-inverse);
   --color-accent: var(--text-accent);
+  --color-marker: var(--text-marker);
   --color-hairline: var(--border-hairline);
   --color-strong: var(--border-strong);
   --color-delta-up: var(--delta-up);

@@ -2,6 +2,8 @@ import "server-only";
 import { db } from "./db";
 import { AssumptionsSchema, type Assumptions, type AssumptionRegistry } from "./finance/types";
 import { PLAN_SECTIONS } from "@/lib/content/sections";
+import { MarketSizingSchema, type MarketSizing } from "@/lib/market/sizing";
+import { ResilienceSchema, type Resilience } from "@/lib/market/resilience";
 
 /* ==========================================================================
    Plan persistence.
@@ -66,7 +68,11 @@ export async function listPlans(workspaceId: string): Promise<PlanSummary[]> {
 export async function getPlan(planId: string, workspaceId: string) {
   return db.plan.findFirst({
     where: { id: planId, workspaceId },
-    include: { sections: { orderBy: { position: "asc" } } },
+    include: {
+      sections: { orderBy: { position: "asc" } },
+      competitors: { orderBy: { position: "asc" } },
+      citations: { orderBy: { createdAt: "asc" } },
+    },
   });
 }
 
@@ -100,6 +106,24 @@ export function parseContext(json: string): Record<string, unknown> {
     return JSON.parse(json) as Record<string, unknown>;
   } catch {
     return {};
+  }
+}
+
+/** Market sizing inputs. Returns an empty build rather than null: the sizing
+ *  page always renders, and an empty build is a legitimate starting state. */
+export function parseSizing(json: string): MarketSizing {
+  try {
+    return MarketSizingSchema.parse(json ? JSON.parse(json) : {});
+  } catch {
+    return MarketSizingSchema.parse({});
+  }
+}
+
+export function parseResilience(json: string): Resilience {
+  try {
+    return ResilienceSchema.parse(json ? JSON.parse(json) : {});
+  } catch {
+    return ResilienceSchema.parse({});
   }
 }
 

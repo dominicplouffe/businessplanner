@@ -2,7 +2,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { getSession, getOrCreateWorkspace } from "@/lib/session";
-import { getPlan, parseAssumptions, snapshotPlan, PLAN_SECTIONS } from "@/lib/plans";
+import {
+  getPlan,
+  parseAssumptions,
+  parseResilience,
+  parseSizing,
+  snapshotPlan,
+  PLAN_SECTIONS,
+} from "@/lib/plans";
 import { buildModel } from "@/lib/finance/engine";
 import { computeMetrics } from "@/lib/finance/metrics";
 import { getGenerator } from "@/lib/ai";
@@ -67,6 +74,29 @@ export async function POST(request: Request) {
     metrics,
     ...(instruction ? { instruction } : {}),
     written,
+    // The market page's evidence travels with the request, which is what lets
+    // a market section be written from named competitors and dated sources
+    // rather than from adjectives.
+    market: {
+      sizing: parseSizing(plan.marketJson),
+      competitors: plan.competitors.map((c) => ({
+        name: c.name,
+        url: c.url,
+        positioning: c.positioning,
+        priceLabel: c.priceLabel,
+        priceDate: c.priceDate,
+        strengths: c.strengths,
+        weaknesses: c.weaknesses,
+      })),
+      citations: plan.citations.map((c) => ({
+        label: c.label,
+        url: c.url,
+        publisher: c.publisher,
+        sourceDate: c.sourceDate,
+        claim: c.claim,
+      })),
+    },
+    resilience: parseResilience(plan.resilienceJson),
   };
 
   // Snapshot before overwriting, so a regeneration is always reversible — the

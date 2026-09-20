@@ -2,6 +2,8 @@ import type { GenerationContext } from "./types";
 import { formatCurrency, formatMultiple, formatPercent } from "@/lib/finance/format";
 import { getBenchmark } from "@/lib/finance/benchmarks";
 import { PURPOSES } from "@/lib/content/intake";
+import { computeSizing } from "@/lib/market/sizing";
+import { assessResilience } from "@/lib/market/resilience";
 
 /* ==========================================================================
    The facts block.
@@ -115,6 +117,82 @@ export function buildFactsBlock(ctx: GenerationContext): string {
   lines.push(`- Source: ${benchmark.sourceLabel}, ${benchmark.vintage}`);
   if (benchmark.notes) lines.push(`- Note: ${benchmark.notes}`);
   lines.push("");
+
+  if (ctx.market) {
+    const sizing = computeSizing(ctx.market.sizing, model);
+    lines.push("MARKET, BUILT FROM THE GROUND UP (use these figures verbatim)");
+    if (sizing.complete) {
+      for (const step of sizing.steps) {
+        lines.push(
+          `- ${step.label}: ${
+            step.kind === "currency" ? money(step.value) : Math.round(step.value).toLocaleString("en-US")
+          }${step.workings ? ` (${step.workings})` : ""}`,
+        );
+      }
+      if (sizing.modelCheck.status === "checked" && sizing.modelCheck.overruns) {
+        lines.push(
+          `- WARNING: the model forecasts more revenue than this build says is obtainable. Do not claim both.`,
+        );
+      }
+    } else {
+      lines.push("- Not built yet. Do not state a market size: there is no arithmetic behind one.");
+    }
+    lines.push("");
+
+    lines.push("NAMED COMPETITORS (the only ones you may name)");
+    if (ctx.market.competitors.length === 0) {
+      lines.push("- None recorded. Do not invent competitors; say the comparison set is not yet established.");
+    }
+    for (const competitor of ctx.market.competitors) {
+      lines.push(
+        `- ${competitor.name}${competitor.url ? ` (${competitor.url})` : ""}: ${
+          competitor.positioning || "position not recorded"
+        }. Price: ${
+          competitor.priceLabel
+            ? `${competitor.priceLabel}${competitor.priceDate ? `, observed ${competitor.priceDate}` : " (undated — do not quote it)"}`
+            : "none recorded — do not state one"
+        }.${competitor.weaknesses ? ` Weak on: ${competitor.weaknesses}.` : ""}`,
+      );
+    }
+    lines.push("");
+
+    lines.push("SOURCES ON FILE (the only outside claims you may make)");
+    if (ctx.market.citations.length === 0) {
+      lines.push("- None. Every statistic you write would be uncited, so write none.");
+    }
+    ctx.market.citations.forEach((citation, i) => {
+      lines.push(
+        `- [${i + 1}] ${citation.claim || citation.label} — ${citation.label}${
+          citation.publisher ? `, ${citation.publisher}` : ""
+        }, ${citation.sourceDate}${citation.url ? ` (${citation.url})` : ""}`,
+      );
+    });
+    lines.push("");
+  }
+
+  if (ctx.resilience) {
+    const assessment = assessResilience(ctx.resilience);
+    lines.push("AI DISRUPTION ASSESSMENT");
+    lines.push(
+      `- Cost-weighted exposure: ${
+        assessment.exposure === null ? "not assessed" : formatPercent(assessment.exposure)
+      } (${assessment.bandLabel}), covering ${formatPercent(assessment.coverage)} of the cost base`,
+    );
+    for (const task of ctx.resilience.tasks.filter((t) => t.task.trim().length > 0)) {
+      lines.push(
+        `- ${task.task}: ${formatPercent(task.shareOfCost)} of costs, ${task.level} exposure${
+          task.rationale ? ` — ${task.rationale}` : ""
+        }`,
+      );
+    }
+    if (ctx.resilience.moatStatement) {
+      lines.push(`- What is hard to automate: ${ctx.resilience.moatStatement}`);
+    }
+    for (const step of ctx.resilience.roadmap.filter((r) => r.action.trim().length > 0)) {
+      lines.push(`- Planned (${step.horizon}): ${step.action} → ${step.expectedEffect}`);
+    }
+    lines.push("");
+  }
 
   lines.push("PROVENANCE OF THE INPUTS");
   const counts = { known: 0, estimated: 0, benchmark_default: 0 };

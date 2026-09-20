@@ -2,6 +2,8 @@ import type { FinancialModel } from "@/lib/finance/engine";
 import type { Metrics } from "@/lib/finance/metrics";
 import type { Assumptions } from "@/lib/finance/types";
 import { getBenchmark } from "@/lib/finance/benchmarks";
+import { computeSizing, MarketSizingSchema, type MarketSizingInput } from "@/lib/market/sizing";
+import { assessResilience, ResilienceSchema, type ResilienceInput } from "@/lib/market/resilience";
 
 /* ==========================================================================
    Narrative ↔ model consistency.
@@ -66,6 +68,8 @@ export type ConsistencyReport = {
   findings: ConsistencyFinding[];
   /** Figures that did trace to a computed value. */
   reconciledCount: number;
+  /** Figures that are not the model's but are carried by a cited source. */
+  sourcedCount: number;
   /** Every figure examined, reconciled or not. */
   checkedCount: number;
   /** Sections that carried no prose yet, so were not checked. */
@@ -342,6 +346,68 @@ export function buildModelIndex(
   return values;
 }
 
+/**
+ * The market build's own figures.
+ *
+ * TAM, SAM and the obtainable share are computed, not claimed — they come from
+ * a countable population and a spend per customer the author entered, through
+ * the same pure function the market page renders. So they belong in the index
+ * exactly as the engine's figures do; leaving them out would report a plan for
+ * quoting its own arithmetic.
+ */
+export function buildMarketIndex(
+  sizing: MarketSizingInput,
+  model?: FinancialModel,
+): ModelValue[] {
+  const result = computeSizing(sizing, model);
+  if (!result.complete) return [];
+
+  const values: ModelValue[] = [
+    { value: result.tam, kind: "currency", label: "total addressable market" },
+    { value: result.sam, kind: "currency", label: "serviceable market" },
+    { value: result.som, kind: "currency", label: "obtainable market" },
+  ];
+  for (const step of result.steps) {
+    if (step.kind === "currency") {
+      values.push({ value: step.value, kind: "currency", label: step.label });
+    }
+  }
+  const parsed = MarketSizingSchema.parse(sizing);
+  values.push(
+    { value: parsed.qualifiedShare, kind: "percent", label: "share who are plausible buyers" },
+    { value: parsed.servableShare, kind: "percent", label: "serviceable share" },
+    { value: parsed.targetShare, kind: "percent", label: "target share" },
+  );
+  if (parsed.topDownMarketSize !== undefined && parsed.topDownCitationId) {
+    values.push({
+      value: parsed.topDownMarketSize,
+      kind: "currency",
+      label: "published market size",
+    });
+  }
+  return values;
+}
+
+/**
+ * The AI-disruption assessment's own arithmetic.
+ *
+ * Exposure and coverage are computed from the shares the author entered, the
+ * same way the module renders them, so prose quoting either is quoting a
+ * derived figure rather than making a claim.
+ */
+export function buildResilienceIndex(resilience: ResilienceInput): ModelValue[] {
+  const result = assessResilience(resilience);
+  const values: ModelValue[] = [];
+  if (result.exposure !== null) {
+    values.push({ value: result.exposure, kind: "percent", label: "AI exposure" });
+  }
+  values.push({ value: result.coverage, kind: "percent", label: "share of costs assessed" });
+  for (const task of ResilienceSchema.parse(resilience).tasks) {
+    values.push({ value: task.shareOfCost, kind: "percent", label: `${task.task} share of costs` });
+  }
+  return values;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Reconciliation                                                             */
 /* -------------------------------------------------------------------------- */
@@ -383,17 +449,43 @@ function nearest(figure: ExtractedFigure, index: ModelValue[]): ModelValue | und
   return bestDistance / scale <= 0.5 ? best : undefined;
 }
 
+/**
+ * Figures a citation vouches for.
+ *
+ * Not every number in a plan comes from the model, and it should not: "the
+ * catchment holds 24,000 households" is a market fact, and the right answer is
+ * a source, not a model cell. So citation claims are run through the same
+ * extractor, and a figure matching one of them is sourced rather than invented.
+ * Without this, citing a statistic correctly would be reported as fabricating
+ * one — the check would punish exactly the behaviour it exists to encourage.
+ */
+export function buildCitedIndex(claims: string[]): ModelValue[] {
+  return claims.flatMap((claim) =>
+    extractFigures(claim).map((figure) => ({
+      value: figure.value,
+      kind: figure.kind,
+      label: "a cited source",
+    })),
+  );
+}
+
 export function checkSection(
   section: { key: string; title: string; text: string },
   index: ModelValue[],
-): { findings: ConsistencyFinding[]; checked: number; reconciled: number } {
+  cited: ModelValue[] = [],
+): { findings: ConsistencyFinding[]; checked: number; reconciled: number; sourced: number } {
   const figures = extractFigures(section.text);
   const findings: ConsistencyFinding[] = [];
   let reconciled = 0;
+  let sourced = 0;
 
   for (const figure of figures) {
     if (index.some((candidate) => matches(figure, candidate))) {
       reconciled++;
+      continue;
+    }
+    if (cited.some((candidate) => matches(figure, candidate))) {
+      sourced++;
       continue;
     }
     const near = nearest(figure, index);
@@ -405,30 +497,33 @@ export function checkSection(
     });
   }
 
-  return { findings, checked: figures.length, reconciled };
+  return { findings, checked: figures.length, reconciled, sourced };
 }
 
 export function checkPlan(
   sections: { key: string; title: string; text: string }[],
   index: ModelValue[],
+  cited: ModelValue[] = [],
 ): ConsistencyReport {
   const findings: ConsistencyFinding[] = [];
   const skippedSections: string[] = [];
   let checkedCount = 0;
   let reconciledCount = 0;
+  let sourcedCount = 0;
 
   for (const section of sections) {
     if (section.text.trim().length === 0) {
       skippedSections.push(section.key);
       continue;
     }
-    const result = checkSection(section, index);
+    const result = checkSection(section, index, cited);
     findings.push(...result.findings);
     checkedCount += result.checked;
     reconciledCount += result.reconciled;
+    sourcedCount += result.sourced;
   }
 
-  return { findings, checkedCount, reconciledCount, skippedSections };
+  return { findings, checkedCount, reconciledCount, sourcedCount, skippedSections };
 }
 
 function humaniseKey(key: string): string {

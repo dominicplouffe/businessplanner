@@ -71,7 +71,21 @@ export type ReviewInput = {
   /** Section keys carrying prose, and the full expected set. */
   sectionsWritten: string[];
   sectionsExpected: string[];
+  /** What the market page holds. Absent until it has been visited. */
+  market?: MarketEvidence;
   asOf?: Date;
+};
+
+export type MarketEvidence = {
+  sizingComplete: boolean;
+  competitorCount: number;
+  /** Competitors carrying both a link and a dated price. */
+  evidencedCompetitorCount: number;
+  citationCount: number;
+  /** Citations carrying both a link and a date. */
+  followableCitationCount: number;
+  /** Figures in the prose that are neither the model's nor cited. */
+  uncitedFigureCount: number;
 };
 
 /** A blocking finding caps the score here, one point below the passing band. */
@@ -202,8 +216,8 @@ function evidenceChecks(input: ReviewInput): RubricCheck[] {
   const known = entries.filter((e) => e.provenance === "known").length;
   const defaults = entries.filter((e) => e.provenance === "benchmark_default").length;
   const knownShare = entries.length === 0 ? 0 : known / entries.length;
-
   const defaultShare = entries.length === 0 ? 1 : defaults / entries.length;
+  const market = input.market;
 
   return [
     {
@@ -225,10 +239,37 @@ function evidenceChecks(input: ReviewInput): RubricCheck[] {
             : `${pct(defaultShare)} of drivers are industry medians. A reader discounts a plan built on them.`,
     },
     {
-      label: "Market claims carry a dated source",
-      passed: false,
-      detail:
-        "Grounded market research with citations is not built yet, so no claim in this plan is sourced.",
+      label: "The market is built from the ground up",
+      passed: market?.sizingComplete ?? false,
+      detail: !market
+        ? "The market page has not been filled in."
+        : market.sizingComplete
+          ? "A countable population, a qualified share and a spend per customer, with the arithmetic shown."
+          : "No bottom-up build yet. A share of a large number is the market section readers discount first.",
+    },
+    {
+      label: "Three competitors are named with dated price evidence",
+      passed: (market?.evidencedCompetitorCount ?? 0) >= 3,
+      detail: !market
+        ? "No competitors recorded."
+        : `${market.competitorCount} named, ${market.evidencedCompetitorCount} carrying both a link and a dated price.`,
+    },
+    {
+      label: "Every outside claim carries a source a reader can follow",
+      passed:
+        market !== undefined &&
+        market.uncitedFigureCount === 0 &&
+        market.citationCount > 0 &&
+        market.followableCitationCount === market.citationCount,
+      detail: !market
+        ? "No sources recorded."
+        : market.citationCount === 0
+          ? "No sources recorded. Any statistic the plan quotes counts as uncited."
+          : market.uncitedFigureCount > 0
+            ? `${plural(market.uncitedFigureCount, "figure")} in the prose ${market.uncitedFigureCount === 1 ? "is" : "are"} neither the model's nor covered by a source.`
+            : market.followableCitationCount < market.citationCount
+              ? `${market.citationCount - market.followableCitationCount} of ${plural(market.citationCount, "source")} cannot be followed — a reference with no link or no date cannot be re-checked.`
+              : `${plural(market.citationCount, "source")}, all dated and linked.`,
     },
   ];
 }
