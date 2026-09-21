@@ -234,6 +234,31 @@ export class SiteStack extends Stack {
         DB_HOST: database.dbInstanceEndpointAddress,
         DB_PORT: database.dbInstanceEndpointPort,
         DB_NAME: "venturelly",
+
+        /* Postgres 17's default parameter group ships `rds.force_ssl=1`, so the
+           server rejects an unencrypted connection:
+
+               no pg_hba.conf entry for host "10.0.3.139",
+               user "venturelly", database "venturelly", no encryption
+
+           Only the app hit this, which is what made it confusing: `prisma
+           migrate deploy` runs on Prisma's own engine, which negotiates TLS by
+           default, so migrations applied cleanly and then every query from the
+           server failed. The app goes through `@prisma/adapter-pg`, and
+           node-postgres defaults to `ssl: false` — a connection string with no
+           `sslmode` resolves to no TLS at all.
+
+           `no-verify` rather than `require`: node-postgres reads `require` as
+           verify-full, and an RDS certificate chains to the Amazon RDS root,
+           which is not in Node's trust store — so `require` fails to connect
+           rather than connecting unverified. Encrypting without pinning the CA
+           is what is available until the image carries the RDS bundle; the hop
+           is to an address in an isolated subnet either way.
+
+           This belongs here and not in the composed URL because the URL is
+           assembled in the entrypoint, and the same value has to hold for a
+           connection string this stack never sees. */
+        PGSSLMODE: "no-verify",
       },
       secrets: {
         /* The credentials, and only the credentials.

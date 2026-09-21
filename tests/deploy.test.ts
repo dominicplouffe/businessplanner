@@ -448,6 +448,50 @@ describe("the regression the sixth deploy was", () => {
   });
 });
 
+describe("the regression the seventh deploy was", () => {
+  /* Migrations applied cleanly and then every query from the server failed:
+
+       no pg_hba.conf entry for host "10.0.3.139",
+       user "venturelly", database "venturelly", no encryption
+
+     Postgres 17's default parameter group ships `rds.force_ssl=1`. The two
+     halves of the container talk to the same database over different clients,
+     and only one of them was encrypting: `prisma migrate deploy` runs on
+     Prisma's own engine, which negotiates TLS by default, while the app goes
+     through `@prisma/adapter-pg`, and node-postgres resolves a connection
+     string carrying no `sslmode` to `ssl: false`.
+
+     That asymmetry is what made it read as a migration that had worked. The
+     rule is that the driver the *app* uses has to be told to encrypt. */
+  const stack = () => readFileSync("infra/lib/site-stack.ts", "utf8");
+
+  it("tells node-postgres to encrypt", () => {
+    const mode = /PGSSLMODE: "([a-z-]+)"/.exec(stack())?.[1];
+    expect(mode, "nothing tells the pg driver to use TLS").toBeTruthy();
+    expect(mode, "this mode leaves the connection unencrypted").not.toBe("disable");
+  });
+
+  it("does not ask for a verification the image cannot do", () => {
+    /* Every one of these resolves, in node-postgres, to a TLS connection whose
+       certificate is checked against Node's trust store — `require` and
+       `prefer` included, which is the trap: they read like "encrypt, loosely"
+       and behave like verify-full. An RDS certificate chains to the Amazon RDS
+       root, which is not in that store, so any of them fails to connect rather
+       than connecting unverified.
+
+       Until the image ships the RDS CA bundle, the only mode that both
+       satisfies `rds.force_ssl` and completes a handshake is `no-verify`. When
+       the bundle arrives this test is the thing that has to change, which is
+       the point of naming the reason here. */
+    const mode = /PGSSLMODE: "([a-z-]+)"/.exec(stack())?.[1];
+    for (const needsATrustAnchor of ["require", "prefer", "verify-ca", "verify-full"]) {
+      expect(mode, `PGSSLMODE=${mode} cannot verify an RDS certificate`).not.toBe(
+        needsATrustAnchor,
+      );
+    }
+  });
+});
+
 describe("the regression the fifth deploy was", () => {
   /* `✓ Docker version 29.7.2` printed immediately before
      `permission denied while trying to connect to the docker API`. The check was
