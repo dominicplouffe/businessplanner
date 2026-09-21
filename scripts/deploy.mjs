@@ -642,7 +642,8 @@ async function createInfrastructure(answers) {
   }
 
   note("First run takes about 25 minutes — most of it RDS and CloudFront.");
-  note("The service will sit at 0 healthy tasks until the image exists. That is correct.");
+  note("The service is created wanting zero tasks, because the image it would run does");
+  note("not exist yet: this stack creates the repository. Step 6 pushes one and raises it.");
   cdk(["deploy", CERT_STACK, SITE_STACK, ...cdkContext(answers),
     "--context", "imageTag=bootstrap", "--require-approval", "never"]);
   ok("stacks deployed");
@@ -817,6 +818,8 @@ async function waitForHealth(answers, outputs) {
 
   if (outputs.ClusterName && outputs.ServiceName) {
     out(`    ${dim("waiting for the ECS service to stabilise (this can take a few minutes)…")}`);
+    note("First time through, the tasks are starting rather than restarting: the image is");
+    note("pulled, the migrations run, and only then does the container bind a port.");
     const waited = run("aws", ["ecs", "wait", "services-stable", "--cluster", outputs.ClusterName,
       "--services", outputs.ServiceName, "--region", REGION], { allowFail: true });
     if (waited.status === 0) ok("service stable");

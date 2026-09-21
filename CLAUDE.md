@@ -329,6 +329,19 @@ Postgres minors on a schedule, so a pinned minor is a deploy that stops working
 on a date nobody wrote down. `VER_17` renders `EngineVersion: "17"` and RDS uses
 the current default. `tests/deploy.test.ts` fails on anything narrower.
 
+**A first deploy must not ask for tasks it cannot start.** The ECR repository is
+created by the same stack as the service, so on a first deploy it is necessarily
+empty — and CloudFormation blocks until an `AWS::ECS::Service` reaches steady
+state, which a service that cannot pull an image never does. With the deployment
+circuit breaker on it fails outright, taking twenty-five minutes of RDS and
+CloudFront down in the rollback. `BOOTSTRAP_TAG` in `infra/lib/site-stack.ts` is
+the answer: a deploy carrying that tag creates the service with
+`desiredCount: 0`, which is stable at once, and the second deploy raises it
+against an image that exists. The autoscaling block is skipped for the same
+deploy and that is the half that is easy to miss — Application Auto Scaling
+*enforces* `minCapacity`, so a scalable target registered during the bootstrap
+would put the count straight back to 2 and reproduce the hang.
+
 **A rollback is not a clean slate.** Two resources survive one and then collide
 on the next create with errors that do not mention the rollback: the ECR
 repository carries `removalPolicy: RETAIN` with a fixed name, and CloudFormation

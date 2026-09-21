@@ -153,6 +153,24 @@ different: it needs `--retain-resources` and a decision about what to keep, so
 the script refuses to guess and hands it back with the command that shows what
 failed.
 
+**Two things are worth synthesising before a deploy**, with no AWS credentials.
+The AZ lookup needs context, so put it in `infra/cdk.context.json` (gitignored)
+as `"availability-zones:account=<id>:region=<region>": ["<id>a", "<id>b", "<id>c"]`:
+
+```bash
+cd infra
+npx cdk synth VenturellySite --context account=<ACCOUNT_ID> \
+  --context hostedZoneId=<ZONE_ID> --context domainName=getventurely.com \
+  --context imageTag=bootstrap --quiet
+# → DesiredCount 0, no AWS::ApplicationAutoScaling::ScalableTarget
+#   with a real tag instead: DesiredCount 2, one target, MinCapacity 2
+```
+
+The scalable target is the half of that pair that is easy to miss: Application
+Auto Scaling *enforces* `minCapacity`, so a target registered during the
+bootstrap deploy would raise the count straight back to 2 and the service would
+hang exactly as it did before.
+
 **Never pin a minor engine version.** `infra/lib/site-stack.ts` asks for
 `PostgresEngineVersion.VER_17` — the major version only — so RDS uses whatever
 minor is current. It was briefly `VER_17_2`, which AWS had retired, and a pinned
@@ -205,10 +223,27 @@ npx cdk deploy VenturellyCertificate VenturellySite \
   --context imageTag=bootstrap
 ```
 
-> The service will not start yet. It is pointed at an image tag that does not
-> exist, and the secrets below are empty. Both are fixed in steps 5 and 6.
-> Expect the ECS service to sit at 0/2 healthy tasks until then — that is
-> correct, not a failure.
+> The service is created **wanting zero tasks**, and that is the point.
+> `imageTag=bootstrap` is a tag nothing has been pushed to — this stack creates
+> the repository, so on a first deploy it is necessarily empty. Steps 5 and 6
+> fill the secret and push a real image, and step 6's deploy raises the count.
+>
+> This is not cosmetic. CloudFormation blocks until an `AWS::ECS::Service`
+> reaches steady state, and a service that cannot pull an image never does: with
+> the deployment circuit breaker on, the resource fails and takes twenty-five
+> minutes of RDS and CloudFront down with it. The real failure, before
+> `BOOTSTRAP_TAG` existed:
+>
+> ```
+> CREATE_FAILED | AWS::ECS::Service | Service/Service
+> "Error occurred during operation 'ECS Deployment Circuit Breaker was triggered'."
+> ```
+>
+> If you are deploying by hand rather than with the script, pass
+> `--context imageTag=bootstrap` for the first deploy and a real tag afterwards.
+> A stack already blocked on the service can still be rescued by pushing that
+> exact tag from another terminal before the circuit breaker gives up — ECS
+> retries failed launches, and the repository exists by then.
 
 Write down the outputs. You need `EcrRepositoryUri` and `AppSecretArn`.
 

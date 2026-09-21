@@ -260,6 +260,46 @@ describe("the preflight that would have caught the failure", () => {
   });
 });
 
+describe("the regression the second deploy was", () => {
+  /* `CREATE_FAILED | AWS::ECS::Service | "ECS Deployment Circuit Breaker was
+     triggered"`, then a full rollback of twenty-five minutes of RDS and
+     CloudFront. The ECR repository is created by the same stack, so a first
+     deploy has nothing to pull — and CloudFormation blocks until an ECS service
+     reaches steady state, which a service that cannot start a task never does.
+
+     These are source assertions rather than template ones on purpose. Proving
+     it properly means two `cdk synth` runs, which is twenty seconds against a
+     suite that takes eight, for an invariant whose realistic failure is somebody
+     deleting the branch. DEPLOY.md carries the two-synth command, and it is what
+     the change was verified with:
+
+       imageTag=bootstrap → DesiredCount 0, no scalable target
+       imageTag=abc1234   → DesiredCount 2, one scalable target, MinCapacity 2 */
+  const stack = () => readFileSync("infra/lib/site-stack.ts", "utf8");
+
+  it("asks for no tasks when there is no image to run", () => {
+    expect(stack()).toMatch(/desiredCount:\s*bootstrapping\s*\?\s*0\s*:/);
+  });
+
+  it("does not register a scalable target that would undo it", () => {
+    // Application Auto Scaling enforces minCapacity, so a scalable target with
+    // a minimum of 2 puts the count straight back and the service hangs again.
+    // This is the half of the fix that is easy to miss.
+    expect(stack()).toMatch(/if\s*\(isProduction\s*&&\s*!bootstrapping\)/);
+  });
+
+  it("derives bootstrapping from the tag rather than a second flag", () => {
+    expect(stack()).toMatch(/const bootstrapping = props\.imageTag === BOOTSTRAP_TAG/);
+    expect(stack()).toMatch(/export const BOOTSTRAP_TAG = "bootstrap"/);
+  });
+
+  it("is the tag the deploy script actually passes on the first deploy", () => {
+    // A stack that bootstraps on "bootstrap" and a script that passes
+    // "bootstrapping" would both look right and fail together.
+    expect(readFileSync("scripts/deploy.mjs", "utf8")).toContain('"imageTag=bootstrap"');
+  });
+});
+
 describe("the regression the first deploy was", () => {
   it("does not pin a Postgres minor version", () => {
     /* `CREATE_FAILED … Cannot find version 17.2 for postgres`. AWS retires

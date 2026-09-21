@@ -45,13 +45,36 @@ import { Construct } from "constructs";
    Both are `props` so a staging stack can choose differently.
    ========================================================================== */
 
+/**
+ * The tag the very first deploy uses, before there is any image to push.
+ *
+ * The ECR repository is created by this stack, so on a first deploy it is
+ * necessarily empty — there is nowhere to have pushed to. That would be
+ * harmless if CloudFormation treated a service with no running tasks as
+ * created, but `AWS::ECS::Service` blocks until the service reaches steady
+ * state, and the deployment circuit breaker fails it after a few launches that
+ * cannot pull an image. The real failure, on the second attempt at a first
+ * deploy:
+ *
+ *     CREATE_FAILED | AWS::ECS::Service | Service/Service
+ *     "Error occurred during operation 'ECS Deployment Circuit Breaker was
+ *      triggered'."
+ *
+ * — and with it a full rollback of twenty-five minutes of RDS and CloudFront.
+ * So a bootstrap deploy asks for no tasks at all (see `desiredCount` below),
+ * which reaches steady state at once. The second deploy, with a real tag and an
+ * image behind it, is what raises the count.
+ */
+export const BOOTSTRAP_TAG = "bootstrap";
+
 export type SiteStackProps = StackProps & {
   /** Apex domain. The hosted zone must already exist in this account. */
   domainName: string;
   /** The zone's id, when it is known. Given one, the stack skips the Route 53
    *  lookup — which is what lets it synthesise without AWS credentials. */
   hostedZoneId?: string;
-  /** Tag of the image in ECR to run. The CI workflow passes the commit SHA. */
+  /** Tag of the image in ECR to run. The CI workflow passes the commit SHA;
+   *  `BOOTSTRAP_TAG` means no image exists yet — see above. */
   imageTag: string;
   /** Smaller and cheaper for a staging stack. */
   production?: boolean;
@@ -66,6 +89,9 @@ export class SiteStack extends Stack {
 
     const isProduction = props.production ?? true;
     const domainName = props.domainName;
+
+    /* No image has been pushed yet, so nothing can be asked to run. */
+    const bootstrapping = props.imageTag === BOOTSTRAP_TAG;
 
     /* ---- Network ------------------------------------------------------- */
 
@@ -202,7 +228,10 @@ export class SiteStack extends Stack {
     const service = new ecs.FargateService(this, "Service", {
       cluster,
       taskDefinition,
-      desiredCount: isProduction ? 2 : 1,
+      // Zero while bootstrapping: a service that wants no tasks is stable
+      // immediately, and CloudFormation stops waiting for tasks that could
+      // never start. See BOOTSTRAP_TAG.
+      desiredCount: bootstrapping ? 0 : isProduction ? 2 : 1,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       assignPublicIp: false,
       circuitBreaker: { rollback: true },
@@ -215,7 +244,12 @@ export class SiteStack extends Stack {
     dbSecret.grantRead(taskDefinition.taskRole);
     appSecret.grantRead(taskDefinition.taskRole);
 
-    if (isProduction) {
+    /* Not while bootstrapping, and this is the half of the fix that is easy to
+       miss: Application Auto Scaling *enforces* `minCapacity`, so registering a
+       scalable target here would raise the count back to 2 within moments and
+       the service would fail to stabilise exactly as it did before. The second
+       deploy registers it, against an image that exists. */
+    if (isProduction && !bootstrapping) {
       const scaling = service.autoScaleTaskCount({ minCapacity: 2, maxCapacity: 6 });
       scaling.scaleOnCpuUtilization("Cpu", {
         targetUtilizationPercent: 65,
