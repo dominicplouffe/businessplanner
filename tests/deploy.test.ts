@@ -347,6 +347,26 @@ describe("the regression the second deploy was", () => {
     expect(stack()).toMatch(/export const BOOTSTRAP_TAG = "bootstrap"/);
   });
 
+  it("does not retain or protect a database on the deploy that might not finish", () => {
+    /* ROLLBACK_FAILED, with DELETE_FAILED on both data subnets and the database
+       security group — and nothing on the database itself, because RETAIN did
+       what it says and kept it. The retained instance's network interfaces held
+       the subnets, so the rollback could not finish, and clearing it meant
+       deleting by hand a database that had never finished being created.
+
+       There is nothing to protect on a bootstrap deploy; the protections belong
+       to the second one, which is also the one that brings the service up. */
+    expect(stack()).toMatch(/deletionProtection:\s*isProduction && !bootstrapping/);
+    expect(stack()).toMatch(/isProduction && !bootstrapping \? RemovalPolicy\.RETAIN/);
+  });
+
+  it("still retains and protects it on every deploy after the first", () => {
+    // The guarantee the RETAIN exists for is not being traded away — only
+    // deferred by one deploy, to the point where there is something to lose.
+    expect(stack()).toContain("RemovalPolicy.RETAIN");
+    expect(stack()).toMatch(/removalPolicy:\s*\n?\s*isProduction/);
+  });
+
   it("is the tag the deploy script actually passes on the first deploy", () => {
     // A stack that bootstraps on "bootstrap" and a script that passes
     // "bootstrapping" would both look right and fail together.

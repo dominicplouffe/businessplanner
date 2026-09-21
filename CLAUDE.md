@@ -342,6 +342,23 @@ deploy and that is the half that is easy to miss — Application Auto Scaling
 *enforces* `minCapacity`, so a scalable target registered during the bootstrap
 would put the count straight back to 2 and reproduce the hang.
 
+**Do not retain or protect a database on a deploy that might not finish.** The
+RETAIN on the RDS instance exists so a production database is not one `cdk
+destroy` away from losing every plan anybody paid for, and it stays — but applied
+to a *first* create it turns a failure into a wedge:
+
+    ROLLBACK_FAILED | VenturellySite
+    DELETE_FAILED   | DatabaseSecurityGroup, Vpc/dataSubnet1, Vpc/dataSubnet2
+
+Note which resource is absent. RETAIN did what it says: CloudFormation kept the
+database, and the retained instance's network interfaces held the isolated
+subnets and the security group, so the rollback could not finish. Clearing it
+meant deleting by hand a database that had never finished being created. So
+`deletionProtection` and `RemovalPolicy.RETAIN` are both conditioned on
+`!bootstrapping` — they arrive with the second deploy, which is also the one that
+brings the service up, and by then there is something to protect. Both changes
+are metadata or an in-place modify; neither replaces the instance.
+
 **A rollback is not a clean slate.** Two resources survive one and then collide
 on the next create with errors that do not mention the rollback: the ECR
 repository carries `removalPolicy: RETAIN` with a fixed name, and CloudFormation

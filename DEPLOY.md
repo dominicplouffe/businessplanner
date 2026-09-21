@@ -148,10 +148,46 @@ aws secretsmanager delete-secret --secret-id getventurely.com/app \
 
 `VenturellyCertificate` is a separate stack; if it succeeded, leave it alone.
 
-A stack in `DELETE_FAILED`, `ROLLBACK_FAILED` or `UPDATE_ROLLBACK_FAILED` is
-different: it needs `--retain-resources` and a decision about what to keep, so
-the script refuses to guess and hands it back with the command that shows what
-failed.
+### A rollback that itself failed
+
+`ROLLBACK_FAILED` with `DELETE_FAILED` on `Vpc/dataSubnet1`, `Vpc/dataSubnet2`
+and `DatabaseSecurityGroup` — and nothing on `Database` — has one cause. The
+database was retained, exactly as `removalPolicy: RETAIN` asks, and its network
+interfaces are still holding those subnets.
+
+A bootstrap deploy no longer retains or protects the database, so this should not
+recur. To clear one that already happened, confirm what is there first:
+
+```bash
+aws cloudformation describe-stack-events --stack-name VenturellySite --region us-east-1 \
+  --query 'StackEvents[?ResourceStatus==`DELETE_FAILED`].[LogicalResourceId,ResourceStatusReason]' \
+  --output table
+
+aws rds describe-db-instances --region us-east-1 \
+  --query 'DBInstances[].[DBInstanceIdentifier,DBInstanceStatus,DeletionProtection]' --output table
+```
+
+A database from a create that never completed holds nothing — the container runs
+`prisma migrate deploy` before it binds a port, and it never got that far. Read
+the identifier back before deleting it:
+
+```bash
+ID=<the identifier>
+aws rds modify-db-instance --region us-east-1 --db-instance-identifier "$ID" \
+  --no-deletion-protection --apply-immediately
+aws rds delete-db-instance --region us-east-1 --db-instance-identifier "$ID" \
+  --skip-final-snapshot --delete-automated-backups
+aws rds wait db-instance-deleted --region us-east-1 --db-instance-identifier "$ID"
+
+aws cloudformation delete-stack --stack-name VenturellySite --region us-east-1
+```
+
+`node scripts/deploy.mjs` prints all of this when it meets the state. It does not
+run it: every line deletes a database, and a script that decides that for itself
+will one day decide it about a database somebody's plans are in.
+
+A `DELETE_FAILED` or `UPDATE_ROLLBACK_FAILED` with some other cause needs
+`--retain-resources` and the same kind of judgement.
 
 **Two things are worth synthesising before a deploy**, with no AWS credentials.
 The AZ lookup needs context, so put it in `infra/cdk.context.json` (gitignored)

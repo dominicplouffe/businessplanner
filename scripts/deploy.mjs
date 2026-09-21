@@ -649,12 +649,41 @@ async function recoverFailedStack(answers) {
     return;
   }
   if (action === "manual") {
-    stop(
-      `${SITE_STACK} is ${status}.`,
-      "A failed delete or rollback needs `--retain-resources` and a decision about what to",
-      "keep. Guessing at that can destroy a database, so this is yours:",
-      `  aws cloudformation describe-stack-events --stack-name ${SITE_STACK} --region ${REGION}`,
-    );
+    /* Deliberately not automated. Everything below deletes a database, and a
+       script that decides that for itself is a script that will one day decide
+       it about a database somebody's plans are in. But the shape is known well
+       enough to say what is almost certainly wrong and what to type. */
+    out();
+    out(red(`✗ ${SITE_STACK} is ${status}.`));
+    note("A failed rollback needs a decision about what to keep, so this one is yours.");
+    out();
+    out("  Most likely cause, if DELETE_FAILED names the data subnets or the database");
+    out("  security group: the database was RETAINed, and its network interfaces are");
+    out("  still holding those subnets. Confirm, then clear it:");
+    out();
+    out(`    aws cloudformation describe-stack-events --stack-name ${SITE_STACK} --region ${REGION} \\`);
+    out("      --query 'StackEvents[?ResourceStatus==`DELETE_FAILED`].[LogicalResourceId,ResourceStatusReason]' \\");
+    out("      --output table");
+    out();
+    out(`    aws rds describe-db-instances --region ${REGION} \\`);
+    out("      --query 'DBInstances[].[DBInstanceIdentifier,DBInstanceStatus,DeletionProtection]' --output table");
+    out();
+    out("  A database from a create that never completed holds nothing — no migration has");
+    out(`  run against it. Read the identifier back before deleting it, then:`);
+    out();
+    out(`    aws rds modify-db-instance --region ${REGION} --db-instance-identifier "$ID" \\`);
+    out("      --no-deletion-protection --apply-immediately");
+    out(`    aws rds delete-db-instance --region ${REGION} --db-instance-identifier "$ID" \\`);
+    out("      --skip-final-snapshot --delete-automated-backups");
+    out(`    aws rds wait db-instance-deleted --region ${REGION} --db-instance-identifier "$ID"`);
+    out();
+    out(`    aws cloudformation delete-stack --stack-name ${SITE_STACK} --region ${REGION}`);
+    out();
+    note("Then run this again. A bootstrap deploy no longer retains or protects the");
+    note("database, so a first create that fails rolls back cleanly from here on.");
+    out();
+    closeInput();
+    process.exit(1);
   }
 
   warn(`${SITE_STACK} is ${bold(status)} and cannot be updated. It has to be deleted first.`);

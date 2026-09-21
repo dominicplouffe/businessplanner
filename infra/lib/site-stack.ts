@@ -149,10 +149,32 @@ export class SiteStack extends Stack {
       multiAz: isProduction,
       storageEncrypted: true,
       backupRetention: Duration.days(isProduction ? 14 : 1),
-      deletionProtection: isProduction,
-      // A production database that disappears with the stack is one `cdk
-      // destroy` away from losing every plan anybody has paid for.
-      removalPolicy: isProduction ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+
+      /* Protected from the second deploy onwards, and deliberately not before.
+
+         A production database that disappears with the stack is one `cdk
+         destroy` away from losing every plan anybody has paid for — so it is
+         retained, and protected from deletion. But applied to a *first* deploy
+         those two turn a failure into a wedge, which is what happened:
+
+             ROLLBACK_FAILED | VenturellySite
+             DELETE_FAILED   | DatabaseSecurityGroup
+             DELETE_FAILED   | Vpc/dataSubnet1, Vpc/dataSubnet2
+
+         Note which resource is absent from that list. RETAIN did exactly what it
+         says: CloudFormation kept the database. The retained instance's network
+         interfaces then held the isolated subnets and the security group, so the
+         rollback could not finish, and clearing it meant deleting by hand a
+         database that had never finished being created and held nothing.
+
+         There is nothing to protect on a bootstrap deploy, by definition — no
+         migration has run against it and no plan can exist in it. So the
+         protections arrive with the second deploy, which is also the one that
+         brings the service up. Both directions are metadata or an in-place
+         modify: neither replaces the instance. */
+      deletionProtection: isProduction && !bootstrapping,
+      removalPolicy:
+        isProduction && !bootstrapping ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
       enablePerformanceInsights: isProduction,
     });
 
