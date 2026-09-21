@@ -560,21 +560,93 @@ async function bootstrap(answers) {
  * - CloudFormation deletes a Secrets Manager secret with a recovery window, so
  *   the name is taken for another thirty days.
  */
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/** What CloudFormation is working on right now, for a stack mid-operation. */
+function currentlyBusyWith(name) {
+  const events = aws(
+    ["cloudformation", "describe-stack-events", "--stack-name", name, "--max-items", "20"],
+    { mutates: false },
+  );
+  const event = (events?.StackEvents ?? []).find(
+    (e) => e.ResourceStatus?.endsWith("_IN_PROGRESS") && e.ResourceType !== "AWS::CloudFormation::Stack",
+  );
+  return event ? `${event.ResourceStatus} ${event.LogicalResourceId} (${event.ResourceType})` : null;
+}
+
+/**
+ * Sit with a stack that is mid-operation until it settles.
+ *
+ * Bouncing somebody out with "wait and run again" is a poor answer to a state
+ * this script produces itself: a rollback of the site stack deletes a NAT
+ * gateway and an RDS instance and takes ten to twenty minutes, and it is exactly
+ * what somebody re-running this will meet. It is also the moment to say the
+ * reassuring thing, because it is true and not obvious — CloudFormation is doing
+ * the work server-side, so it continues whether or not any terminal stays open.
+ */
+async function waitForStackToSettle(name, status) {
+  warn(`${name} is ${bold(status)} — something is already in flight.`);
+  const busy = currentlyBusyWith(name);
+  if (busy) note(`currently: ${busy}`);
+  note("CloudFormation is doing this server-side. It carries on whether or not a terminal");
+  note("stays open, so a window that closed mid-deploy has not left anything half-done.");
+  if (/ROLLBACK|DELETE/.test(status)) {
+    note("A rollback here deletes a NAT gateway and an RDS instance: ten to twenty minutes.");
+  }
+
+  if (DRY) {
+    skip("would wait for it to settle");
+    return status;
+  }
+  if (!(await confirm("Wait for it to finish?", true))) {
+    stop(
+      `Nothing can be done to ${name} while it is ${status}.`,
+      "Run this again once it has settled — two deploys racing each other is how a stack",
+      "reaches a state a script cannot fix.",
+    );
+  }
+
+  const startedAt = Date.now();
+  for (let attempt = 0; attempt < 160; attempt += 1) {
+    await sleep(15_000);
+    const now = stackStatus(name);
+    // No stack at all: the rollback took it with it, which is a clean slate.
+    if (!now) {
+      ok(`${name} is gone — nothing left to clean up`);
+      return undefined;
+    }
+    if (!now.endsWith("_IN_PROGRESS")) {
+      ok(`settled at ${now} after ${Math.round((Date.now() - startedAt) / 60_000)} min`);
+      return now;
+    }
+    if (attempt % 4 === 3) {
+      const doing = currentlyBusyWith(name);
+      note(`${Math.round((Date.now() - startedAt) / 60_000)} min — ${doing ?? now}`);
+    }
+  }
+  stop(
+    `${name} has been ${status} for forty minutes.`,
+    "That is longer than this stack's slowest resource, so look at what it is stuck on:",
+    `  aws cloudformation describe-stack-events --stack-name ${name} --region ${REGION} \\`,
+    `    --max-items 20 --query 'StackEvents[].[Timestamp,ResourceStatus,LogicalResourceId]' --output table`,
+  );
+}
+
 async function recoverFailedStack(answers) {
   heading(3, "Check for a failed earlier attempt");
 
-  const status = stackStatus(SITE_STACK);
+  let status = stackStatus(SITE_STACK);
+  if (stackAction(status) === "wait") status = await waitForStackToSettle(SITE_STACK, status);
+
   const action = stackAction(status);
   if (action === "create" || action === "update") {
     skip(status ? `${SITE_STACK} is ${status}` : `${SITE_STACK} does not exist yet`);
     return;
   }
   if (action === "wait") {
-    stop(
-      `${SITE_STACK} is ${status}.`,
-      "Something is already in flight. Wait for it to settle and run this again —",
-      "two deploys racing each other is how a stack reaches a state a script cannot fix.",
-    );
+    // Only reachable from a dry run, which does not actually wait.
+    skip("still in flight");
+    return;
   }
   if (action === "manual") {
     stop(
