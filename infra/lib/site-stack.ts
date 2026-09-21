@@ -206,11 +206,23 @@ export class SiteStack extends Stack {
     const cluster = new ecs.Cluster(this, "Cluster", { vpc, containerInsightsV2: ecs.ContainerInsights.ENABLED });
 
     const taskDefinition = new ecs.FargateTaskDefinition(this, "Task", {
-      // Chromium is the reason for the memory. A PDF render loads a full
-      // browser alongside the Node server, and a task that is killed mid-render
-      // looks to the user like the export button simply not working.
-      cpu: isProduction ? 1024 : 512,
-      memoryLimitMiB: isProduction ? 2048 : 1024,
+      /* Chromium is the reason for the memory, and the only reason. A PDF
+         render loads a full browser alongside the Node server, and a task
+         killed mid-render looks to the user like the export button simply not
+         working — so this is sized for the render, not for the steady state.
+
+         The steady state is nowhere near it: the service idles at ~145MB and
+         under 1% CPU, which is what made the previous 1 vCPU / 2GB hard to
+         justify while nobody is using it. 1GB leaves ~880MB over idle for the
+         browser. If an export starts failing on a large plan, this is the
+         number to raise first, and `MemoryUtilization` on the service is where
+         it shows — Chromium is killed by the task limit, so the symptom is a
+         dead task rather than an error from the exporter.
+
+         Production and development are the same size now rather than one being
+         a scaled-down guess at the other. */
+      cpu: 512,
+      memoryLimitMiB: 1024,
       runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.X86_64 },
     });
 
@@ -320,10 +332,20 @@ export class SiteStack extends Stack {
     const service = new ecs.FargateService(this, "Service", {
       cluster,
       taskDefinition,
-      // Zero while bootstrapping: a service that wants no tasks is stable
-      // immediately, and CloudFormation stops waiting for tasks that could
-      // never start. See BOOTSTRAP_TAG.
-      desiredCount: bootstrapping ? 0 : isProduction ? 2 : 1,
+      /* Zero while bootstrapping: a service that wants no tasks is stable
+         immediately, and CloudFormation stops waiting for tasks that could
+         never start. See BOOTSTRAP_TAG.
+
+         One otherwise. Two was redundancy for traffic that does not exist yet,
+         and it is the autoscaler's job to add the second when it does — the
+         floor below is what decides how few run, and `maxCapacity` still allows
+         six. What one task costs is availability, not throughput: a deploy is
+         still seamless, because `minHealthyPercent: 100` with `maxHealthyPercent:
+         200` starts the replacement before stopping the old one, but an
+         unplanned task death is a real outage for the ~90s it takes ECS to
+         replace it, and there is no second AZ holding the service up meanwhile.
+         Raise this to 2 before that matters. */
+      desiredCount: bootstrapping ? 0 : 1,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       assignPublicIp: false,
       circuitBreaker: { rollback: true },
@@ -342,7 +364,16 @@ export class SiteStack extends Stack {
        the service would fail to stabilise exactly as it did before. The second
        deploy registers it, against an image that exists. */
     if (isProduction && !bootstrapping) {
-      const scaling = service.autoScaleTaskCount({ minCapacity: 2, maxCapacity: 6 });
+      /* The floor has to agree with `desiredCount` above. Application Auto
+         Scaling enforces `minCapacity` continuously, not just at creation, so a
+         2 here would raise the count back within moments and the saving would
+         quietly not happen — the same mechanism as the bootstrap hang, arriving
+         as a surprise on the bill instead of as a failed deploy.
+
+         Note that CloudFormation will not correct this by itself if the target
+         is edited out of band: the value is unchanged between templates, so the
+         resource is skipped and the drift survives the next deploy. */
+      const scaling = service.autoScaleTaskCount({ minCapacity: 1, maxCapacity: 6 });
       scaling.scaleOnCpuUtilization("Cpu", {
         targetUtilizationPercent: 65,
         scaleInCooldown: Duration.minutes(5),

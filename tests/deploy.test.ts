@@ -614,7 +614,7 @@ describe("the regression the second deploy was", () => {
      the change was verified with:
 
        imageTag=bootstrap → DesiredCount 0, no scalable target
-       imageTag=abc1234   → DesiredCount 2, one scalable target, MinCapacity 2 */
+       imageTag=abc1234   → DesiredCount 1, one scalable target, MinCapacity 1 */
   const stack = () => readFileSync("infra/lib/site-stack.ts", "utf8");
 
   it("asks for no tasks when there is no image to run", () => {
@@ -626,6 +626,21 @@ describe("the regression the second deploy was", () => {
     // a minimum of 2 puts the count straight back and the service hangs again.
     // This is the half of the fix that is easy to miss.
     expect(stack()).toMatch(/if\s*\(isProduction\s*&&\s*!bootstrapping\)/);
+  });
+
+  it("does not set a floor above the count it asks for", () => {
+    /* Application Auto Scaling enforces `minCapacity` continuously, so a floor
+       higher than `desiredCount` wins and the service quietly runs more tasks
+       than the stack appears to ask for. That failed loudly during the
+       bootstrap hang; once an image exists it fails silently, on the bill. */
+    const desired = /desiredCount: bootstrapping \? 0 : (\d+)/.exec(stack())?.[1];
+    const floor = /autoScaleTaskCount\(\{ minCapacity: (\d+)/.exec(stack())?.[1];
+    expect(desired, "could not find desiredCount").toBeTruthy();
+    expect(floor, "could not find minCapacity").toBeTruthy();
+    expect(
+      Number(floor),
+      `minCapacity ${floor} would override desiredCount ${desired}`,
+    ).toBeLessThanOrEqual(Number(desired));
   });
 
   it("derives bootstrapping from the tag rather than a second flag", () => {
