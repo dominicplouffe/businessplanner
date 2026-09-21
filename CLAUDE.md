@@ -314,11 +314,14 @@ a startup failure rather than a runtime fallback to `DevBilling`.
 The infrastructure is CDK in `infra/`: ECS Fargate behind an ALB behind
 CloudFront, RDS Postgres Multi-AZ, the certificate in its own us-east-1 stack
 because CloudFront accepts no other region. `DEPLOY.md` is the runbook and
-`pnpm deploy:aws` (`scripts/deploy.mjs`) is the runbook made executable — it
-asks for what it needs, checks each step against AWS before doing it, and is
-re-runnable, which is what a twenty-five-minute step requires. It is Node with
-no dependencies specifically so that `jq` and `openssl` are not prerequisites:
-`JSON.stringify` and `crypto.randomBytes` do both jobs.
+`node scripts/deploy.mjs` is the runbook made executable — it asks for what it
+needs, checks each step against AWS before doing it, and is re-runnable, which is
+what a twenty-five-minute step requires. It is Node with no dependencies
+specifically so that `jq` and `openssl` are not prerequisites: `JSON.stringify`
+and `crypto.randomBytes` do both jobs. **Document it as `node scripts/deploy.mjs`
+and not as `pnpm deploy:aws`** — the `package.json` alias exists, but a script
+whose whole point is having no dependencies must not require a package manager
+to launch it, and the person deploying turned out not to have pnpm installed.
 
 **Pin a major engine version, never a minor.** `VER_17_2` failed the first real
 deploy ten minutes in with `Cannot find version 17.2 for postgres` — AWS retires

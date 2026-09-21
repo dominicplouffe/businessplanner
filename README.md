@@ -89,9 +89,13 @@ before changing the engine, the statement shaping, or the token layer.
 ## Deploying
 
 ```
-pnpm deploy:aws              # the whole deploy, one question at a time
-pnpm deploy:aws --dry-run    # every question and command, writing nothing
+node scripts/deploy.mjs              # the whole deploy, one question at a time
+node scripts/deploy.mjs --dry-run    # every question and command, writing nothing
 ```
+
+Run it from the repository root. `pnpm deploy:aws` is an alias; the script has no
+dependencies of its own, so it never needs a package manager to start it — only
+`node`, the `aws` CLI, `docker` and `npx`.
 
 `scripts/deploy.mjs` walks the whole thing: preflight, CDK bootstrap, the stacks,
 the application secret, the image, the Stripe endpoint and the GitHub OIDC deploy

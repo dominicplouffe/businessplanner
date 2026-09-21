@@ -19,9 +19,9 @@ away from cheaper — see *Making it cheaper* at the end.
   the domain is registered elsewhere, point its nameservers at the Route 53
   zone and wait for that to propagate before creating the infrastructure —
   certificate validation will otherwise sit pending forever.
-- Node 22, the AWS CLI v2, and Docker. `jq` and `openssl` are *not* needed:
-  `scripts/deploy.mjs` does both jobs with `JSON.stringify` and
-  `crypto.randomBytes`.
+- Node 22, the AWS CLI v2, and Docker — and nothing else. `jq` and `openssl` are
+  *not* needed: `scripts/deploy.mjs` does both jobs with `JSON.stringify` and
+  `crypto.randomBytes`. Nor is pnpm; run the script with `node` directly.
 - A Stripe account. Test mode is fine to start.
 
 **`.env` has nothing to do with any of this.** It is gitignored, it is not
@@ -66,8 +66,13 @@ project's rules forbid.
 ## 2. Run it
 
 ```bash
-pnpm deploy:aws
+node scripts/deploy.mjs
 ```
+
+From the repository root, not from `infra/`. `pnpm deploy:aws` is an alias for
+the same thing if you have pnpm; the script deliberately has no dependencies, so
+it should never be the reason you need to install a package manager. It needs
+`node`, the `aws` CLI, `docker`, and `npx` — which comes with npm.
 
 That is the whole deploy. It asks for everything it needs, checks what has
 already been done before doing anything, and can be run again after a failure —
@@ -75,9 +80,9 @@ which matters, because the longest step takes twenty-five minutes and the first
 real run of it failed ten minutes in.
 
 ```
-pnpm deploy:aws --dry-run    # every question and every command, writing nothing
-pnpm deploy:aws --from=5     # resume at a step
-pnpm deploy:aws --help
+node scripts/deploy.mjs --dry-run    # every question and every command, writing nothing
+node scripts/deploy.mjs --from=5     # resume at a step
+node scripts/deploy.mjs --help
 ```
 
 It asks: region, domain, production or staging sizing, `BETTER_AUTH_SECRET`
@@ -126,7 +131,7 @@ the next create, neither with an error that mentions the rollback:
 | ECR repository `venturelly` | `removalPolicy: RETAIN`, fixed name | `… with identifier 'venturelly' already exists` |
 | Secret `getventurely.com/app` | CloudFormation deletes a secret with a 30-day recovery window, and the name is fixed | `… a secret with this name is already scheduled for deletion` |
 
-`pnpm deploy:aws` detects all three and offers to clear them, one confirmation
+The script detects all three and offers to clear them, one confirmation
 each. By hand, in this order — the stack first, because deleting it is what
 strands the other two:
 

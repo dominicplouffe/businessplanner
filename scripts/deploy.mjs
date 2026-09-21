@@ -27,9 +27,15 @@
    Node with no dependencies, which is also what removes `jq` and `openssl`:
    `JSON.stringify` and `crypto.randomBytes` do both jobs.
 
-       pnpm deploy:aws              # the whole thing, resumable
-       pnpm deploy:aws --dry-run    # print every question and command, touch nothing
-       pnpm deploy:aws --from=5     # resume at a step
+       node scripts/deploy.mjs              # the whole thing, resumable
+       node scripts/deploy.mjs --dry-run    # every question and command, writing nothing
+       node scripts/deploy.mjs --from=5     # resume at a step
+
+   Invoked with `node`, not through a package manager. `pnpm deploy:aws` is an
+   alias in `package.json`, but a script whose whole point is having no
+   dependencies must not need one installed to start it — the first person to run
+   this did not have pnpm. Paths resolve from this file rather than the working
+   directory, so it runs correctly from anywhere in the repository.
    ========================================================================== */
 
 import { spawnSync } from "node:child_process";
@@ -67,10 +73,10 @@ const FROM = Number(argv.find((a) => a.startsWith("--from="))?.slice(7) ?? 0);
 
 const USAGE = `Deploy Venturelly to AWS.
 
-  pnpm deploy:aws                the whole thing, resumable
-  pnpm deploy:aws --dry-run      print every question and command, write nothing
-  pnpm deploy:aws --from=5       resume at a step (preflight always runs)
-  pnpm deploy:aws --help         this
+  node scripts/deploy.mjs                the whole thing, resumable
+  node scripts/deploy.mjs --dry-run      every question and command, writing nothing
+  node scripts/deploy.mjs --from=5       resume at a step (preflight always runs)
+  node scripts/deploy.mjs --help         this
 
 Steps:
   1 preflight          6 build and push the image
@@ -912,7 +918,7 @@ async function configureWebhook(answers, outputs, written) {
     stop(
       `The secret is missing ${incomplete.join(", ")}, so it cannot be updated in place.`,
       "Re-run step 5 to write all four keys at once:",
-      "  pnpm deploy:aws --from=5",
+      "  node scripts/deploy.mjs --from=5",
     );
   }
   for (const key of Object.keys(merged)) {
@@ -1052,7 +1058,8 @@ function finish(answers, outputs) {
   out();
   out("  Walk one purchase end to end with Stripe's test card 4242 4242 4242 4242:");
   out("    sign up → finish an intake → try to export (refuses with 402) → pay → export.");
-  out("  `pnpm e2e` does exactly this against a local server and is the script to copy from.");
+  out("  `node tests/e2e/smoke.mjs` does exactly this against a local server, and is the");
+  out("  script to copy from.");
   out();
   out(`  ${dim(`curl -sI ${url} | head -1`)}`);
   out(`  ${dim(`curl -s ${url}/api/health`)}`);
