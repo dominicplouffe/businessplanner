@@ -76,11 +76,21 @@ const argv = process.argv.slice(2);
 const DRY = argv.includes("--dry-run");
 const FROM = Number(argv.find((a) => a.startsWith("--from="))?.slice(7) ?? 0);
 
+/* Deploy the CloudFormation stack without rebuilding the image.
+
+   Written after giving somebody the wrong advice. A fix that lives in the stack
+   — a secret key, an instance class, a flag on the service — reaches AWS only
+   through the `cdk deploy` inside step 6, which also builds and pushes an image
+   that has not changed. The choice was a pointless ten-minute build or a `cdk
+   deploy` typed by hand with the four context flags remembered correctly. */
+const STACK_ONLY = argv.includes("--stack-only");
+
 const USAGE = `Deploy Venturelly to AWS.
 
   node scripts/deploy.mjs                the whole thing, resumable
   node scripts/deploy.mjs --dry-run      every question and command, writing nothing
-  node scripts/deploy.mjs --from=5       resume at a step (preflight always runs)
+  node scripts/deploy.mjs --from=6       resume at a step (preflight always runs)
+  node scripts/deploy.mjs --stack-only   redeploy the stack, no image rebuild
   node scripts/deploy.mjs --help         this
 
 Steps:
@@ -101,7 +111,9 @@ if (argv.includes("--help") || argv.includes("-h")) {
 
 /* An unrecognised flag is a typo, and a typo that is ignored is a deploy that
    does something other than what was asked for. */
-const unknown = argv.filter((a) => a !== "--dry-run" && !a.startsWith("--from="));
+const unknown = argv.filter(
+  (a) => a !== "--dry-run" && a !== "--stack-only" && !a.startsWith("--from="),
+);
 if (unknown.length > 0) {
   process.stderr.write(`Unrecognised: ${unknown.join(" ")}\n\n${USAGE}`);
   process.exit(2);
@@ -1096,6 +1108,24 @@ async function fillSecret(answers, outputs) {
 async function pushImage(answers, outputs) {
   heading(6, "Build and push the application image");
 
+  if (STACK_ONLY) {
+    /* The tag already deployed, so the service keeps the image it has and only
+       the template changes. Read from the stack rather than from `.deploy.json`,
+       which records what this script last pushed and not what is running. */
+    const running = imageTagInUse(outputs) ?? answers.lastImageTag;
+    if (!running) {
+      stop(
+        "--stack-only needs the tag the service is already running, and none was found.",
+        "Drop the flag and let step 6 build one.",
+      );
+    }
+    skip(`keeping the image already deployed: ${running}`);
+    cdk(["deploy", SITE_STACK, ...cdkContext(answers), "--context", `imageTag=${running}`,
+      "--require-approval", "never"]);
+    ok("stack redeployed");
+    return;
+  }
+
   const registry = `${answers.account}.dkr.ecr.${REGION}.amazonaws.com`;
   const repositoryUri = outputs.EcrRepositoryUri ?? `${registry}/${ECR_REPOSITORY}`;
   const sha = run("git", ["rev-parse", "--short", "HEAD"], { mutates: false, capture: true,
@@ -1147,6 +1177,23 @@ async function pushImage(answers, outputs) {
 /* ==========================================================================
    Step 7 — wait for it to actually serve
    ========================================================================== */
+
+/** The image tag the service is actually running, from its task definition. */
+function imageTagInUse(outputs) {
+  if (!outputs.ClusterName || !outputs.ServiceName) return null;
+  const service = aws(
+    ["ecs", "describe-services", "--cluster", outputs.ClusterName, "--services", outputs.ServiceName],
+    { mutates: false },
+  );
+  const arn = service?.services?.[0]?.taskDefinition;
+  if (!arn) return null;
+  const described = aws(["ecs", "describe-task-definition", "--task-definition", arn], {
+    mutates: false,
+  });
+  const image = described?.taskDefinition?.containerDefinitions?.[0]?.image;
+  const tag = typeof image === "string" ? image.split(":").pop() : null;
+  return tag && tag !== BOOTSTRAP_TAG ? tag : null;
+}
 
 async function waitForHealth(answers, outputs) {
   heading(7, "Wait for the service to come up");

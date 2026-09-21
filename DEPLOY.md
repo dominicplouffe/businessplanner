@@ -101,6 +101,14 @@ Preflight always runs — it is what establishes the account, region, domain and
 hosted zone every later step uses — but a resume does not re-interview you: with
 `--from=`, anything already in `.deploy.json` is used as it stands.
 
+**A change to `infra/` reaches AWS only through step 6**, which is also where the
+image is built. When nothing in the application changed — an instance class, a
+flag on the service, a key read out of a secret — `--stack-only` redeploys the
+template against the tag the service is already running, taken from its task
+definition rather than from what this script last pushed. When the image changed
+too, use the ordinary `--from=6`: an old image against a new template is its own
+kind of broken.
+
 It asks: region, domain, production or staging sizing, `BETTER_AUTH_SECRET`
 (offering to generate one), `STRIPE_SECRET_KEY`, `ANTHROPIC_API_KEY` (which may
 be empty), the image tag, and later the `STRIPE_WEBHOOK_SECRET` and the GitHub

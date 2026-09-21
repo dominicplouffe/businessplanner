@@ -327,6 +327,31 @@ describe("the preflight that would have caught the failure", () => {
   });
 });
 
+describe("changing the stack without rebuilding the image", () => {
+  const script = () => readFileSync("scripts/deploy.mjs", "utf8");
+
+  it("takes the running tag from the task definition, not from what it last pushed", () => {
+    /* `.deploy.json` records what this script pushed, which is not necessarily
+       what the service is running — somebody may have rolled back, or deployed
+       from CI. The task definition is the only honest answer. */
+    expect(script()).toContain("function imageTagInUse(outputs)");
+    expect(script()).toContain('"ecs", "describe-task-definition"');
+  });
+
+  it("refuses rather than guessing when no tag can be found", () => {
+    const at = script().indexOf("if (STACK_ONLY)");
+    expect(at).toBeGreaterThan(-1);
+    expect(script().slice(at, at + 900)).toContain("--stack-only needs the tag");
+  });
+
+  it("never builds or pushes on that path", () => {
+    const at = script().indexOf("if (STACK_ONLY)");
+    const block = script().slice(at, script().indexOf("return;", at));
+    expect(block).not.toContain('"build"');
+    expect(block).not.toContain('"push"');
+  });
+});
+
 describe("the way out", () => {
   const script = () => readFileSync("scripts/deploy.mjs", "utf8");
 
