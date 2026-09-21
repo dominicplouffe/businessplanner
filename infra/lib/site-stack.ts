@@ -222,6 +222,26 @@ export class SiteStack extends Stack {
       }),
       environment: {
         NODE_ENV: "production",
+
+        /* The standalone server binds `process.env.HOSTNAME`, and the runtime
+           supplies one: in awsvpc mode the container's hostname is its private
+           DNS name, and that arrives in the environment and wins over the
+           image's `ENV HOSTNAME=0.0.0.0`. So the server bound one interface
+           instead of all of them, which splits the two health checks apart —
+           the load balancer reaches the task at its own address and passes,
+           while the container check asks 127.0.0.1 and is refused:
+
+               (task 4425b973…) failed container health checks
+
+           and ECS kills a task the balancer considers healthy. Setting it
+           explicitly here is what actually reaches the process; the image's
+           value never survives.
+
+           The startup banner is the tell. Bound to every interface Next prints
+           `Local: http://localhost:3000`; it printed the EC2 internal name on
+           both lines instead. */
+        HOSTNAME: "0.0.0.0",
+
         NEXT_PUBLIC_SITE_URL: `https://${domainName}`,
         BETTER_AUTH_URL: `https://${domainName}`,
         CHROMIUM_EXECUTABLE_PATH: "/usr/bin/chromium",

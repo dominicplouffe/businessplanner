@@ -492,6 +492,42 @@ describe("the regression the seventh deploy was", () => {
   });
 });
 
+describe("the regression the eighth deploy was", () => {
+  /* ECS killed tasks the load balancer was happily serving:
+
+       (task 4425b973...) failed container health checks
+
+     Two probes ask the same question of the same container and only one of
+     them could get an answer. The standalone server binds
+     `process.env.HOSTNAME`, and in awsvpc mode the runtime puts the task's
+     private DNS name there, over the top of the image's `ENV
+     HOSTNAME=0.0.0.0`. Bound to a single interface, the task answers the
+     balancer at its own address and refuses 127.0.0.1, which is where the
+     container check asks.
+
+     So the value has to be set where it actually reaches the process. */
+  const stack = () => readFileSync("infra/lib/site-stack.ts", "utf8");
+
+  it("binds every interface, from the task definition", () => {
+    /* Not the Dockerfile: it sets this too, and the runtime overwrites it.
+       The task definition is the copy that wins. */
+    expect(stack(), "the image's HOSTNAME does not survive awsvpc").toContain(
+      'HOSTNAME: "0.0.0.0"',
+    );
+  });
+
+  it("checks the container on an address that binding gives it", () => {
+    /* If the loopback probe stays, the bind has to include loopback. These two
+       move together or a task passes one probe and is killed by the other. */
+    const probe = /command: \["CMD-SHELL", "([^"]*(?:\\.[^"]*)*)"\]/.exec(stack())?.[1] ?? "";
+    if (probe.includes("127.0.0.1")) {
+      expect(stack(), "a loopback probe needs HOSTNAME=0.0.0.0").toContain(
+        'HOSTNAME: "0.0.0.0"',
+      );
+    }
+  });
+});
+
 describe("the regression the fifth deploy was", () => {
   /* `✓ Docker version 29.7.2` printed immediately before
      `permission denied while trying to connect to the docker API`. The check was
