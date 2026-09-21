@@ -22,6 +22,18 @@ away from cheaper — see *Making it cheaper* at the end.
 - Node 22, the AWS CLI v2, and Docker — and nothing else. `jq` and `openssl` are
   *not* needed: `scripts/deploy.mjs` does both jobs with `JSON.stringify` and
   `crypto.randomBytes`. Nor is pnpm; run the script with `node` directly.
+- **Your user must be able to reach the Docker daemon**, not merely have the
+  client installed. `docker version` (no `--version`) has to print a *Server*
+  section. If it says `permission denied … /var/run/docker.sock`:
+
+  ```bash
+  sudo usermod -aG docker $USER     # then log out and back in, or: newgrp docker
+  ```
+
+  The script offers `sudo docker` for the run instead, and then uses it for the
+  ECR login as well — `docker login` writes credentials into the home directory
+  of whoever runs it, so a sudo build with a non-sudo login gives a successful
+  build and a denied push.
 - A Stripe account. Test mode is fine to start.
 
 **`.env` has nothing to do with any of this.** It is gitignored, it is not
@@ -81,9 +93,13 @@ real run of it failed ten minutes in.
 
 ```
 node scripts/deploy.mjs --dry-run    # every question and every command, writing nothing
-node scripts/deploy.mjs --from=5     # resume at a step
+node scripts/deploy.mjs --from=6     # resume at a step
 node scripts/deploy.mjs --help
 ```
+
+Preflight always runs — it is what establishes the account, region, domain and
+hosted zone every later step uses — but a resume does not re-interview you: with
+`--from=`, anything already in `.deploy.json` is used as it stands.
 
 It asks: region, domain, production or staging sizing, `BETTER_AUTH_SECRET`
 (offering to generate one), `STRIPE_SECRET_KEY`, `ANTHROPIC_API_KEY` (which may

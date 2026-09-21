@@ -286,6 +286,75 @@ function run(command, args, { mutates = true, capture = false, allowFail = false
 
 let REGION = "us-east-1";
 
+/* How to invoke Docker, resolved once and used for every call.
+
+   Not cosmetic. `docker login` writes credentials into the home directory of
+   whoever runs it, so prefixing `sudo` on the build alone leaves the push
+   authenticating as root against a config written by the user — a successful
+   build followed by a denied push, which reads as an ECR problem and is not
+   one. Login, build and push all go through this. */
+let DOCKER = ["docker"];
+
+/**
+ * Ask the daemon, not the client.
+ *
+ * `docker --version` prints the client's own version without contacting
+ * anything, so it succeeds on a machine where Docker is unreachable. It did:
+ * `✓ Docker version 29.7.2` was printed immediately before
+ * `permission denied while trying to connect to the docker API`. `docker
+ * version --format {{.Server.Version}}` fails unless the daemon answers.
+ */
+function probeDocker(command = DOCKER) {
+  const probe = run(command[0], [...command.slice(1), "version", "--format", "{{.Server.Version}}"], {
+    mutates: false,
+    capture: true,
+    allowFail: true,
+  });
+  return { ok: probe.status === 0, version: (probe.stdout ?? "").trim(), why: (probe.stderr ?? "").trim() };
+}
+
+/**
+ * Whether Docker can be used, and how.
+ *
+ * Returns false rather than stopping when it cannot: steps 1–5 are useful on a
+ * machine that will never build the image, and the GitHub deploy role exists
+ * precisely so CI can build instead.
+ */
+async function resolveDocker({ interactive = true } = {}) {
+  const direct = probeDocker(["docker"]);
+  if (direct.ok) {
+    DOCKER = ["docker"];
+    return direct;
+  }
+
+  const denied = /permission denied|connect to the Docker daemon|docker\.sock/i.test(direct.why);
+  if (!denied) {
+    warn("The Docker daemon is not answering.");
+    if (direct.why) note(direct.why.split("\n")[0]);
+    note("Start Docker (or the daemon) before step 6.");
+    return direct;
+  }
+
+  warn("Docker is running, but this user cannot reach its socket.");
+  note("The permanent fix, which every later run needs too:");
+  note("  sudo usermod -aG docker $USER      # then log out and back in, or: newgrp docker");
+  if (!interactive) return direct;
+
+  if (!(await confirm("Use `sudo docker` for this run instead?", true))) return direct;
+
+  const elevated = probeDocker(["sudo", "docker"]);
+  if (!elevated.ok) {
+    warn("`sudo docker` did not work either.");
+    if (elevated.why) note(elevated.why.split("\n")[0]);
+    return elevated;
+  }
+  DOCKER = ["sudo", "docker"];
+  /* And therefore the ECR login too, or the push authenticates as one user
+     against a config written by another. */
+  ok("using `sudo docker` — the ECR login goes through it as well");
+  return elevated;
+}
+
 /* Why the last `aws` call returned null.
    A read that fails is usually a question being answered "no", so `aws` returns
    null rather than stopping — but a check that quietly does not run is worse
@@ -376,10 +445,26 @@ async function preflight(answers) {
   if (!/aws-cli\/2\./.test(cli.stdout)) warn(`${cli.stdout.trim()} — v2 is what this is written for.`);
   else ok(cli.stdout.trim().split(" ")[0]);
 
+  /* A resume is not an interview.
+
+     `--from=6` is somebody coming back after fixing Docker, and asking them for
+     the region and the domain again — with the saved values already in the
+     brackets — reads as the flag having been ignored. Anything already answered
+     is used as it stands; `.deploy.json` is editable, and a fresh run re-asks. */
+  const resuming = FROM > 1;
+  const remembered = async (key, label, options) => {
+    const saved = answers[key];
+    if (resuming && saved !== undefined && saved !== "") {
+      note(`${label}: ${saved} ${dim("(remembered)")}`);
+      return String(saved);
+    }
+    return ask(label, { ...options, fallback: saved ?? options?.fallback });
+  };
+
   /* Region first: every `aws` call below carries it explicitly, because a
      command that silently uses a different region than the stacks is a whole
      evening. */
-  REGION = await ask("AWS region", { fallback: answers.region ?? "us-east-1" });
+  REGION = await remembered("region", "AWS region", { fallback: "us-east-1" });
   answers.region = REGION;
 
   const identity = aws(["sts", "get-caller-identity"], { mutates: false });
@@ -396,7 +481,7 @@ async function preflight(answers) {
   }
   answers.account = identity.Account;
 
-  answers.domainName = await ask("Domain", { fallback: answers.domainName ?? "getventurely.com" });
+  answers.domainName = await remembered("domainName", "Domain", { fallback: "getventurely.com" });
 
   /* The hosted zone, named rather than looked up.
 
@@ -431,13 +516,13 @@ async function preflight(answers) {
     );
   }
 
-  answers.production =
-    answers.production ??
-    (await confirm(
+  if (answers.production === undefined) {
+    answers.production = await confirm(
       "Production sizing? (Multi-AZ, 2 tasks, autoscaling — $90–130/mo; no is roughly half)",
       true,
-    ));
-  ok(answers.production ? "Production sizing" : "Staging sizing");
+    );
+  }
+  ok(`${answers.production ? "Production" : "Staging"} sizing`);
 
   if (!existsSync(join(INFRA, "node_modules"))) {
     out(`  ${dim("installing infra dependencies")}`);
@@ -446,6 +531,13 @@ async function preflight(answers) {
   ok("infra dependencies present");
 
   await checkDatabaseIsOrderable(answers);
+
+  /* Step 6 is twenty-five minutes away and a broken Docker is knowable now.
+     A warning rather than a stop: everything up to step 5 is worth doing on a
+     machine that will never build the image. */
+  const docker = await resolveDocker({ interactive: false });
+  if (docker.ok) ok(`Docker daemon ${docker.version}`);
+  else note("Not needed until step 6, and this will ask again there.");
 
   saveAnswers(answers);
   return answers;
@@ -946,25 +1038,31 @@ async function pushImage(answers, outputs) {
   const repositoryUri = outputs.EcrRepositoryUri ?? `${registry}/${ECR_REPOSITORY}`;
   const sha = run("git", ["rev-parse", "--short", "HEAD"], { mutates: false, capture: true,
     allowFail: true });
-  const tag = await ask("Image tag", { fallback: (sha.stdout || "").trim() || "first" });
+  const tag = await ask("Image tag", {
+    fallback: (sha.stdout || "").trim() || answers.lastImageTag || "first",
+  });
   answers.lastImageTag = tag;
 
-  const docker = run("docker", ["--version"], { mutates: false, capture: true, allowFail: true });
-  if (docker.status !== 0) {
-    stop("Docker is not running.", "Start Docker Desktop (or the daemon) and run this again.");
+  const docker = await resolveDocker();
+  if (!docker.ok && !DRY) {
+    stop(
+      "Docker cannot be reached, so the image cannot be built.",
+      "Everything before this step is done and saved; fix Docker and run:",
+      "  node scripts/deploy.mjs --from=6",
+    );
   }
-  ok(docker.stdout.trim());
+  if (docker.ok) ok(`Docker daemon ${docker.version}`);
 
   const login = run("aws", ["ecr", "get-login-password", "--region", REGION],
     { mutates: false, capture: true, allowFail: true });
   if (login.status !== 0) stop("Could not get an ECR login token.");
   if (!DRY) {
-    const piped = spawnSync("docker",
-      ["login", "--username", "AWS", "--password-stdin", registry],
+    const piped = spawnSync(DOCKER[0],
+      [...DOCKER.slice(1), "login", "--username", "AWS", "--password-stdin", registry],
       { input: login.stdout, encoding: "utf8", stdio: ["pipe", "inherit", "inherit"] });
     if (piped.status !== 0) stop("`docker login` to ECR failed.");
   } else {
-    out(`    ${dim("would run:")} aws ecr get-login-password | docker login --password-stdin ${registry}`);
+    out(`    ${dim("would run:")} aws ecr get-login-password | ${DOCKER.join(" ")} login --password-stdin ${registry}`);
   }
   ok("logged in to ECR");
 
@@ -972,10 +1070,10 @@ async function pushImage(answers, outputs) {
      X86_64, and an image built on an Apple Silicon machine without this runs
      as arm64 and the container dies with `exec format error` — which looks
      like an application fault and is not one. */
-  run("docker", ["build", "--platform", "linux/amd64",
+  run(DOCKER[0], [...DOCKER.slice(1), "build", "--platform", "linux/amd64",
     "--build-arg", `NEXT_PUBLIC_SITE_URL=https://${answers.domainName}`,
     "-t", `${repositoryUri}:${tag}`, "."]);
-  run("docker", ["push", `${repositoryUri}:${tag}`]);
+  run(DOCKER[0], [...DOCKER.slice(1), "push", `${repositoryUri}:${tag}`]);
   ok(`pushed ${repositoryUri}:${tag}`);
 
   cdk(["deploy", SITE_STACK, ...cdkContext(answers), "--context", `imageTag=${tag}`,
@@ -1259,7 +1357,9 @@ async function main() {
   out();
   out(bold("Deploy Venturelly to AWS"));
   if (DRY) out(yellow("  --dry-run: reads are performed, nothing is written."));
-  if (FROM > 1) out(dim(`  starting at step ${FROM}`));
+  if (FROM > 1) {
+    out(dim(`  resuming at step ${FROM}; preflight always runs, using the answers already saved`));
+  }
 
   const answers = loadAnswers();
   const only = (n, fn) => (FROM <= n ? fn() : Promise.resolve(skip(`step ${n} skipped`)));

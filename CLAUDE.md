@@ -397,6 +397,19 @@ replaced once the service is up. Nothing may report the deploy finished while
 that placeholder is in place: the webhook is the only code that grants an
 entitlement.
 
+**Check the daemon, not the client.** `docker --version` prints the client's own
+version and contacts nothing, so it succeeded on a machine where the socket was
+root-only — `✓ Docker version 29.7.2` printed immediately before `permission
+denied while trying to connect to the docker API`. `docker version --format
+{{.Server.Version}}` is the probe. The same shape as the RDS preflight that never
+ran: a check that cannot fail is not a check.
+
+How Docker is invoked is resolved once, into `DOCKER`, and login, build and push
+all go through it. That is not tidiness — `docker login` writes credentials into
+the home directory of whoever runs it, so prefixing `sudo` on the build alone
+leaves the push authenticating as root against a config written by the user, and
+the resulting denial reads as an ECR fault.
+
 `--platform linux/amd64` on `docker build` is not optional. The task definition
 pins X86_64, and an arm64 image dies with `exec format error`, which reads as an
 application fault.

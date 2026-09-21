@@ -321,6 +321,48 @@ describe("the preflight that would have caught the failure", () => {
   });
 });
 
+describe("the regression the fifth deploy was", () => {
+  /* `✓ Docker version 29.7.2` printed immediately before
+     `permission denied while trying to connect to the docker API`. The check was
+     `docker --version`, which prints the *client's* version and contacts
+     nothing, so it passes on a machine where Docker is unreachable. Same class
+     as the preflight that never ran: a check that cannot fail is not a check. */
+  const script = () => readFileSync("scripts/deploy.mjs", "utf8");
+
+  it("asks the daemon for its version, not the client", () => {
+    expect(script()).toContain('"version", "--format", "{{.Server.Version}}"');
+    expect(script()).not.toContain('run("docker", ["--version"]');
+  });
+
+  it("never invokes a bare docker for login, build or push", () => {
+    /* `docker login` writes credentials into the home directory of whoever runs
+       it, so a build prefixed with sudo and a login that is not gives a
+       successful build and a denied push — which reads as an ECR fault. All
+       three go through the one resolved command. */
+    const text = script();
+    for (const call of ['"build"', '"push"', '"login"']) {
+      const at = text.indexOf(call);
+      expect(at, `${call} is not called at all`).toBeGreaterThan(-1);
+      expect(text.slice(Math.max(0, at - 120), at)).not.toMatch(/\bspawnSync\("docker"|run\("docker"/);
+    }
+    expect(text).toContain("DOCKER[0]");
+  });
+
+  it("warns in preflight rather than stopping", () => {
+    // Steps 1-5 are worth doing on a machine that will never build the image;
+    // the GitHub deploy role exists so CI can build instead.
+    expect(script()).toMatch(/resolveDocker\(\{ interactive: false \}\)/);
+  });
+
+  it("uses the answers it saved when resuming rather than asking again", () => {
+    // `--from=6` is somebody coming back after fixing Docker. Asking for the
+    // region and domain again reads as the flag having been ignored.
+    expect(script()).toMatch(/const resuming = FROM > 1/);
+    expect(script()).toContain('remembered("region"');
+    expect(script()).toContain('remembered("domainName"');
+  });
+});
+
 describe("the regression the fourth deploy was", () => {
   /* `[AWS::EarlyValidation::ResourceExistenceCheck]` — CloudFormation refusing
      to create resources whose names were already taken by the previous attempt.
