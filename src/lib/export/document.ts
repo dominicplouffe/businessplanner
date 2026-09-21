@@ -17,6 +17,8 @@ import {
   sbaProgrammeForLoan,
   CONFIG_VINTAGE,
   EQUITY_INJECTION_MINIMUM,
+  FICA_WAGE_BASE,
+  PAYROLL_LOAD,
   type DatedValue,
 } from "@/lib/content/regulatory";
 import { PLAN_SECTIONS } from "@/lib/content/sections";
@@ -354,6 +356,8 @@ function methodology(
   const { programme, ceiling } = sbaProgrammeForLoan(debt, now);
   const threshold = dscrThreshold(programme, now);
   const injection = inForce(EQUITY_INJECTION_MINIMUM, now);
+  const payrollLoad = inForce(PAYROLL_LOAD, now);
+  const wageBase = inForce(FICA_WAGE_BASE, now);
 
   const entries = [
     {
@@ -376,6 +380,23 @@ function methodology(
       source: injection.source.label,
       effectiveFrom: injection.effectiveFrom,
       confidence: injection.confidence,
+    },
+    // Now that the load is read from the dated config rather than hardcoded
+    // in the schema, it can carry its source onto the page a loan officer
+    // reads — which is the whole reason for moving it.
+    {
+      label: "Employer payroll load",
+      value: `${((assumptions.payroll.payrollTaxRate + assumptions.payroll.benefitsRate) * 100).toFixed(2)}% of wages`,
+      source: payrollLoad.source.label,
+      effectiveFrom: payrollLoad.effectiveFrom,
+      confidence: payrollLoad.confidence,
+    },
+    {
+      label: "Taxable wage base",
+      value: `${fmtMoney(assumptions.payroll.taxableWageBase, currency)} per employee per year`,
+      source: wageBase.source.label,
+      effectiveFrom: wageBase.effectiveFrom,
+      confidence: wageBase.confidence,
     },
   ];
 

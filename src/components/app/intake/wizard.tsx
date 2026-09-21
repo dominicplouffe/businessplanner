@@ -7,6 +7,7 @@ import { INTAKE_STEPS, REVENUE_MODELS, type DriverField } from "@/lib/content/in
 import { defaultsForIndustry, SEEDED_KEYS } from "@/lib/content/intake-defaults";
 import { buildAssumptions, type IntakeState, type ProvenanceState } from "@/lib/content/intake-mapper";
 import { saveIntakeAction } from "@/lib/actions/plan-actions";
+import { asPlanPurpose } from "@/lib/review/rubric";
 import { buildModel } from "@/lib/finance/engine";
 import { computeMetrics } from "@/lib/finance/metrics";
 import { validateModel } from "@/lib/finance/validate";
@@ -109,7 +110,7 @@ export function IntakeWizard({
           registry: provenance,
           companyName: String(state["company.name"] ?? ""),
           industryKey: String(state["company.industryKey"] ?? "other"),
-          purpose: String(state["company.purpose"] ?? "internal"),
+          purpose: asPlanPurpose(String(state["company.purpose"] ?? "internal")),
         });
         setSavedAt(new Date());
       } finally {

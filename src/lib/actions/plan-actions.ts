@@ -8,6 +8,7 @@ import { requireUser, getOrCreateWorkspace } from "@/lib/session";
 import { createPlan, snapshotPlan } from "@/lib/plans";
 import { buildAssumptions, type IntakeState, type ProvenanceState } from "@/lib/content/intake-mapper";
 import { AssumptionsSchema } from "@/lib/finance/types";
+import { PLAN_PURPOSES } from "@/lib/review/rubric";
 
 /** Resolves the caller's workspace, or throws. Every action starts here so an
  *  id in a request body is never treated as authorisation. */
@@ -42,7 +43,11 @@ const SaveIntakeSchema = z.object({
   title: z.string().optional(),
   companyName: z.string().optional(),
   industryKey: z.string().optional(),
-  purpose: z.string().optional(),
+  // An enum, not a string. The wizard only offers these four, but a server
+  // action is directly invocable and the rubric indexes its weights by this
+  // value — so an unrecognised one used to be written straight to the column
+  // and then throw on every page that scores the plan.
+  purpose: z.enum(PLAN_PURPOSES).optional(),
 });
 
 export type SaveIntakeInput = z.input<typeof SaveIntakeSchema>;
@@ -118,10 +123,25 @@ export async function saveIntakeAction(raw: SaveIntakeInput) {
   return { ok: true as const, complete };
 }
 
-export async function deletePlanAction(planId: string) {
+/**
+ * Takes a plan off the dashboard without destroying it.
+ *
+ * Archive rather than delete, and that is the whole point. `listPlans` and
+ * the app layout already filter on `status != "archived"`, so the shape was
+ * always intended — but the only action was a hard `deleteMany`, and it had
+ * no caller anywhere in the UI. Deleting cascades the versions and the
+ * sections, and `Purchase.planId` is `SetNull`, so somebody who paid $199
+ * would be left with a payment record pointing at nothing and no way back.
+ * Nothing about "remove this from my list" justifies that.
+ */
+export async function archivePlanAction(planId: string) {
   const { workspace } = await currentWorkspace();
-  await db.plan.deleteMany({ where: { id: planId, workspaceId: workspace.id } });
+  await db.plan.updateMany({
+    where: { id: planId, workspaceId: workspace.id },
+    data: { status: "archived" },
+  });
   revalidatePath("/dashboard");
+  revalidatePath(`/plans/${planId}`);
   redirect("/dashboard");
 }
 

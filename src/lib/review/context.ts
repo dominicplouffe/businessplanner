@@ -48,7 +48,10 @@ export function buildValidationContext(input: {
   return {
     purpose: input.purpose,
     sbaProgramme: sbaProgrammeForLoan(debt, input.asOf).programme,
-    downsideScenarioDriverCount: driversMoved(SCENARIOS.downside.adjustment),
+    // Against this plan, not against the constant. Passing the adjustment
+    // alone made the count a compile-time 6, so the `< 5` gate below it
+    // could never close on anything.
+    downsideScenarioDriverCount: driversMoved(SCENARIOS.downside.adjustment, assumptions),
     ...consistencyFields(input.consistency),
     ...marketFields(input.market, input.model),
     ...(input.asOf ? { asOf: input.asOf } : {}),

@@ -6,8 +6,10 @@ import {
   type Entitlements,
   type SubscriptionState,
 } from "./entitlements";
+import type { DeliveryRecord } from "./delivery";
 
 export * from "./entitlements";
+export { shouldHandleDelivery, type DeliveryRecord } from "./delivery";
 export { getBilling, billingIsLive, stripeClient, type Billing } from "./provider";
 
 /* ==========================================================================
@@ -132,33 +134,44 @@ export async function upsertSubscription(input: {
 }
 
 /**
- * Records that an event was seen, and says whether this is the first time.
+ * Records that an event was seen, and reports what happened to it last time.
  *
- * Purchases are idempotent through their own unique index; everything else
- * needs this. It also doubles as the audit trail for "why did my entitlement
- * change", which is a question that eventually gets asked.
+ * The row is the audit trail for "why did my entitlement change" — it is not
+ * the lock. Purchases are idempotent through their own unique index and
+ * subscriptions through an upsert, which is what CLAUDE.md means by
+ * "idempotency is the unique index, not a check".
+ *
+ * It is written `pending` and updated once the handler has finished, because
+ * the row is taken before the work: a row that still says `pending` means the
+ * process died in between, not that the event was handled.
  */
 export async function recordWebhookEvent(input: {
   stripeEventId: string;
   type: string;
   outcome?: "processed" | "ignored" | "failed";
   note?: string;
-}): Promise<{ firstDelivery: boolean }> {
+}): Promise<DeliveryRecord> {
+  const outcome = input.outcome ?? "pending";
   try {
     await db.webhookEvent.create({
       data: {
         stripeEventId: input.stripeEventId,
         type: input.type,
-        outcome: input.outcome ?? "processed",
+        outcome,
         note: input.note ?? "",
       },
     });
-    return { firstDelivery: true };
+    return { firstDelivery: true, outcome };
   } catch (error) {
-    if (isUniqueViolation(error)) return { firstDelivery: false };
-    throw error;
+    if (!isUniqueViolation(error)) throw error;
+    const existing = await db.webhookEvent.findUnique({
+      where: { stripeEventId: input.stripeEventId },
+      select: { outcome: true },
+    });
+    return { firstDelivery: false, outcome: existing?.outcome ?? "processed" };
   }
 }
+
 
 /** The workspace's Stripe customer, created lazily and stored once. */
 export async function rememberStripeCustomer(

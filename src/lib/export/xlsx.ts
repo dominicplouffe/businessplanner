@@ -205,6 +205,8 @@ function writeDrivers(sheet: ExcelJS.Worksheet, doc: ExportDocument): DriverCell
   put("company.firstTradingMonth", "First trading month", a.company.firstTradingMonth, "0");
   put("payroll.payrollTaxRate", "Employer payroll tax", a.payroll.payrollTaxRate, RATE);
   put("payroll.benefitsRate", "Benefits load", a.payroll.benefitsRate, RATE);
+  put("payroll.cappedTaxRate", "Of which capped at the wage base", a.payroll.cappedTaxRate, RATE);
+  put("payroll.taxableWageBase", "Taxable wage base", a.payroll.taxableWageBase, MONEY);
   put("tax.corporateRate", "Corporate tax rate", a.tax.corporateRate, RATE);
 
   a.revenueStreams.forEach((stream, i) => {
@@ -637,7 +639,17 @@ function writePayroll(
   monthHeaders(sheet, row, labels, months);
   row += 1;
 
-  const load = `(1+${cells.ref["payroll.payrollTaxRate"]}+${cells.ref["payroll.benefitsRate"]})`;
+  /* The load, in two parts, because the engine charges it in two parts.
+     Medicare and benefits apply to every dollar; the OASDI half stops once a
+     head has earned the wage base within a calendar year. A flat multiplier
+     here against a capped engine would put the workbook and the plan into
+     disagreement on the first high salary — and `tests/xlsx.test.ts` checks
+     every month of the P&L against the engine precisely so that cannot
+     happen quietly. */
+  const taxRate = cells.ref["payroll.payrollTaxRate"]!;
+  const capped = cells.ref["payroll.cappedTaxRate"]!;
+  const base = cells.ref["payroll.taxableWageBase"]!;
+  const load = `(1+MAX(0,${taxRate}-${capped})+${cells.ref["payroll.benefitsRate"]})`;
   const roleRows: { row: number; isDirect: boolean; isOwner: boolean }[] = [];
 
   doc.assumptions.roles.forEach((role, i) => {
@@ -645,9 +657,17 @@ function writePayroll(
     const count = cells.ref[`roles.${i}.count`]!;
     const start = cells.ref[`roles.${i}.startMonth`]!;
     const end = cells.ref[`roles.${i}.endMonth`]!;
-    const r = formulaRow(sheet, row, `${role.title}${role.isOwner ? " (owner)" : ""}`, months, (m) =>
-      `=IF(AND(${m}>=${start},${m}<=${end}),${salary}/12*${count}*${load},0)`,
-    );
+    const r = formulaRow(sheet, row, `${role.title}${role.isOwner ? " (owner)" : ""}`, months, (m) => {
+      // Position of this model month within its calendar year, 0 = January.
+      const monthOfYear = (cells.startCalendarMonth - 1 + (m - 1)) % 12;
+      // First model month of that calendar year in which this role is paid.
+      const yearStart = `MAX(${start},${m - monthOfYear})`;
+      const wage = `${salary}/12`;
+      // Wages already paid to one head this calendar year, before this month.
+      const paidBefore = `MAX(0,${m}-${yearStart})*${wage}`;
+      const taxable = `MAX(0,MIN(${wage},${base}-${paidBefore}))`;
+      return `=IF(AND(${m}>=${start},${m}<=${end}),(${wage}*${load}+${taxable}*${capped})*${count},0)`;
+    });
     roleRows.push({ row: r, isDirect: role.isDirectLabour, isOwner: role.isOwner });
     row += 1;
   });

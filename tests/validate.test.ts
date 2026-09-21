@@ -4,6 +4,7 @@ import { computeMetrics } from "@/lib/finance/metrics";
 import { validateModel } from "@/lib/finance/validate";
 import { AssumptionsSchema, type AssumptionsInput } from "@/lib/finance/types";
 import { getBenchmark } from "@/lib/finance/benchmarks";
+import { buildValidationContext } from "@/lib/review/context";
 import { restaurantPlan, saasPlan } from "./fixtures";
 
 const run = (plan: AssumptionsInput, ctx = {}) => {
@@ -94,6 +95,39 @@ describe("validateModel — blocking checks", () => {
     expect(ids(run(saasPlan, { ...cleanContext, downsideScenarioDriverCount: 2 }))).toContain(
       "no-coherent-downside",
     );
+  });
+
+  /* The test above passed the count in directly, so it never noticed that
+     production always passed a compile-time 6 — the check was testable and
+     dead at the same time. This one goes through the real context builder. */
+  it("fires on a real plan with nothing for the downside to cut", () => {
+    const bare = AssumptionsSchema.parse({
+      ...saasPlan,
+      revenueStreams: [
+        { id: "u", name: "Units", kind: "unit-sales", unitsMonth1: 100, monthlyGrowthRate: 0,
+          pricePerUnit: 50, costPerUnit: 20, growth: { shape: "saturating", monthlyRate: 0.01, ceiling: 400 } },
+      ],
+      roles: [],
+      opex: [],
+    });
+    const model = buildModel(bare);
+    const result = validateModel(
+      model,
+      computeMetrics(model),
+      buildValidationContext({ purpose: "sba-loan", assumptions: bare }),
+    );
+    expect(result.findings.map((f) => f.id)).toContain("no-coherent-downside");
+  });
+
+  it("stays quiet on a plan the shipped downside genuinely moves", () => {
+    const full = AssumptionsSchema.parse(saasPlan);
+    const model = buildModel(full);
+    const result = validateModel(
+      model,
+      computeMetrics(model),
+      buildValidationContext({ purpose: "sba-loan", assumptions: full }),
+    );
+    expect(result.findings.map((f) => f.id)).not.toContain("no-coherent-downside");
   });
 
   it("does not apply external-reader checks to an internal plan", () => {
@@ -277,6 +311,58 @@ describe("capacity", () => {
 
   it("lets a stream that states its capacity through", () => {
     const result = run(withStream({}), cleanContext);
+    expect(ids(result).some((id) => id.startsWith("growth-declared-unbounded"))).toBe(false);
+  });
+
+  /* The other way round the ceiling. `linear` makes `max` optional, and
+     without one nothing measures the stream: `ceilingAt` is null, so
+     `saturationAt` is null, so `capacity-never-approached` skips it — and
+     this rule only ever looked at `unbounded`. Worse, it was the default
+     path, because the engine's own fallback hands `hourly-services` exactly
+     that curve and the validator kept a separate table that called its
+     growth rate zero. */
+  const hourly = (extra: Record<string, unknown>): AssumptionsInput => ({
+    ...saasPlan,
+    revenueStreams: [
+      {
+        id: "svc",
+        name: "Client work",
+        kind: "hourly-services",
+        billableHeadcount: 4,
+        hoursPerHeadPerMonth: 160,
+        utilisation: 0.7,
+        hourlyRate: 150,
+        cogsPercent: 0.05,
+        ...extra,
+      } as never,
+    ],
+  });
+
+  it("blocks an hourly stream that grows head count with no stated ceiling", () => {
+    const result = run(hourly({ headcountGrowthPerMonth: 0.5 }), cleanContext);
+    const finding = result.findings.find((f) => f.id.startsWith("growth-declared-unbounded"));
+    expect(finding, `got: ${ids(result).join(", ")}`).toBeDefined();
+    expect(finding!.severity).toBe("blocking");
+  });
+
+  it("blocks a linear curve that declares no maximum", () => {
+    const result = run(
+      hourly({ headcountGrowthPerMonth: 0, growth: { shape: "linear", perMonth: 1 } }),
+      cleanContext,
+    );
+    expect(ids(result).some((id) => id.startsWith("growth-declared-unbounded"))).toBe(true);
+  });
+
+  it("lets a linear curve with a maximum through", () => {
+    const result = run(
+      hourly({ headcountGrowthPerMonth: 0.5, growth: { shape: "linear", perMonth: 0.5, max: 12 } }),
+      cleanContext,
+    );
+    expect(ids(result).some((id) => id.startsWith("growth-declared-unbounded"))).toBe(false);
+  });
+
+  it("does not ask a flat head count for a ceiling", () => {
+    const result = run(hourly({ headcountGrowthPerMonth: 0 }), cleanContext);
     expect(ids(result).some((id) => id.startsWith("growth-declared-unbounded"))).toBe(false);
   });
 

@@ -28,6 +28,11 @@ export type PricedRound = {
 };
 
 export type CapTableRow = {
+  /** Carried through so a holder can be followed across rounds. `dilutionPath`
+   *  used to match founder *ids* against row *names*, so unless the two
+   *  happened to be equal every founder was re-keyed after the first round
+   *  and the dilution column went blank from round two on. */
+  id: string;
   name: string;
   kind: Holder["kind"];
   shares: number;
@@ -93,24 +98,77 @@ export function priceRound(
     workingShares += poolShares;
   }
 
-  const pricePerShare = round.preMoneyValuation / workingShares;
+  /* SAFE conversion, solved rather than approximated.
 
-  // SAFE conversion.
-  const safeConversions: RoundResult["safeConversions"] = [];
-  let safeShares = 0;
-  for (const safe of safes) {
-    const discounted = safe.discount ? pricePerShare * (1 - safe.discount) : pricePerShare;
-    const capPrice = safe.valuationCap ? safe.valuationCap / workingShares : Infinity;
-    const effectivePrice = Math.min(discounted, capPrice);
-    const shares = effectivePrice > 0 ? safe.amount / effectivePrice : 0;
-    safeShares += shares;
-    safeConversions.push({ name: safe.name, shares, effectivePrice, ownership: 0 });
+     Two things were wrong here and both favoured the founders, in the one
+     module whose header says a wrong answer is worse than none.
+
+     `Safe.valuationCap` is documented as a *post-money* cap, and a post-money
+     cap entitles the holder to `amount / cap` of the company as it stands
+     once every SAFE has converted. It was divided by the *pre-money* share
+     count, which is the pre-money convention and hands the holder less.
+
+     And the priced investor was issued shares at `preMoney / workingShares`
+     while the SAFE shares were added to the denominator afterwards — so the
+     lead ended up below the percentage they had negotiated. SAFEs convert
+     pre-money: the dilution belongs to the existing holders, and the new
+     investor gets `amount / postMoney`.
+
+     Both denominators are therefore "shares once the SAFEs have converted",
+     which is what the SAFEs are being solved for. The loop is a fixed point:
+     it contracts whenever the SAFEs claim less than the whole company, and
+     the check afterwards refuses the case where they do not. */
+  /* The share of the converted table each SAFE claims, which is what makes
+     the fixed point below a contraction. A cap claims `amount / cap`; a
+     discount claims `amount / (preMoney × (1 − d))`, because its price is
+     struck off the round price. Whichever is cheaper for the holder governs,
+     so the larger fraction is the one that counts. If the total reaches one,
+     the SAFEs have sold the company twice and there is no table to solve. */
+  const claimed = safes.reduce((sum, safe) => {
+    const byCap = safe.valuationCap ? safe.amount / safe.valuationCap : 0;
+    const byDiscount =
+      safe.discount && round.preMoneyValuation > 0
+        ? safe.amount / (round.preMoneyValuation * (1 - safe.discount))
+        : 0;
+    return sum + Math.max(byCap, byDiscount);
+  }, 0);
+  if (claimed >= 1) {
+    throw new Error(
+      "SAFEs cannot convert: their caps and discounts claim the whole company or more. Check them against the amounts raised.",
+    );
   }
 
+  let safeShares = 0;
+  let safeConversions: RoundResult["safeConversions"] = [];
+  for (let pass = 0; pass < 64; pass += 1) {
+    const converted = workingShares + safeShares;
+    const roundPrice = converted > 0 ? round.preMoneyValuation / converted : 0;
+
+    let next = 0;
+    safeConversions = safes.map((safe) => {
+      const discounted = safe.discount ? roundPrice * (1 - safe.discount) : roundPrice;
+      const capPrice = safe.valuationCap ? safe.valuationCap / converted : Infinity;
+      const effectivePrice = Math.min(discounted, capPrice);
+      const shares = effectivePrice > 0 ? safe.amount / effectivePrice : 0;
+      next += shares;
+      return { name: safe.name, shares, effectivePrice, ownership: 0 };
+    });
+
+    if (Math.abs(next - safeShares) <= Math.max(1e-9, Math.abs(next) * 1e-12)) {
+      safeShares = next;
+      break;
+    }
+    safeShares = next;
+  }
+
+  // Priced pre-money, over the table the SAFEs have already converted into.
+  const pricePerShare =
+    workingShares + safeShares > 0 ? round.preMoneyValuation / (workingShares + safeShares) : 0;
   const newShares = pricePerShare > 0 ? round.amount / pricePerShare : 0;
   const totalAfter = workingShares + safeShares + newShares;
 
   const rows: CapTableRow[] = existing.map((h) => ({
+    id: h.id,
     name: h.name,
     kind: h.kind,
     shares: h.shares,
@@ -120,6 +178,7 @@ export function priceRound(
 
   if (poolShares > 0) {
     rows.push({
+      id: `${round.name}:pool`,
       name: "Option pool (new)",
       kind: "option-pool",
       shares: poolShares,
@@ -128,18 +187,21 @@ export function priceRound(
     });
   }
 
-  for (const conv of safeConversions) {
+  safes.forEach((safe, i) => {
+    const conv = safeConversions[i]!;
     conv.ownership = ownershipOf(conv.shares, totalAfter);
     rows.push({
+      id: safe.id,
       name: conv.name,
       kind: "investor",
       shares: conv.shares,
       ownership: conv.ownership,
       priorOwnership: null,
     });
-  }
+  });
 
   rows.push({
+    id: `${round.name}:lead`,
     name: round.name,
     kind: "investor",
     shares: newShares,
@@ -166,7 +228,6 @@ export function dilutionPath(
 ): { roundName: string; founderOwnership: number }[] {
   let holders = [...founders];
   const path: { roundName: string; founderOwnership: number }[] = [];
-  const founderIds = new Set(founders.map((f) => f.id));
 
   for (const { round, safes } of rounds) {
     const result = priceRound(holders, round, safes ?? []);
@@ -177,9 +238,13 @@ export function dilutionPath(
       roundName: round.name,
       founderOwnership: ownershipOf(founderShares, result.totalSharesAfter),
     });
-    // Carry the post-round table forward.
-    holders = result.rows.map((r, idx) => ({
-      id: founderIds.has(r.name) ? r.name : `${round.name}-${idx}`,
+    /* Carry the post-round table forward, ids intact. This used to re-key
+       every row as `${round.name}-${idx}` unless the holder's id happened to
+       equal their name, so from the second round on nothing matched the
+       previous table and `priorOwnership` — the dilution column — was null
+       for every founder. */
+    holders = result.rows.map((r) => ({
+      id: r.id,
       name: r.name,
       shares: r.shares,
       kind: r.kind,

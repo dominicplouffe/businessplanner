@@ -50,6 +50,38 @@ describe("buildScenarios", () => {
     // The validator requires a downside to move at least five drivers.
     expect(driversMoved(SCENARIOS.downside.adjustment)).toBeGreaterThanOrEqual(5);
   });
+
+  /* Counted against the plan, not against the constant. Without a plan this
+     is a compile-time property of SCENARIOS, which is what made the blocking
+     `no-coherent-downside` check unable to fire on anything. */
+  it("does not count a driver the plan has nothing for", () => {
+    const withPlan = driversMoved(SCENARIOS.downside.adjustment, parsed());
+    expect(withPlan).toBe(6);
+
+    // The SaaS fixture is the only one with churn to worsen; a restaurant
+    // has none, so its downside genuinely moves one driver fewer.
+    const noSubscription = AssumptionsSchema.parse({
+      ...saasPlan,
+      revenueStreams: [
+        { id: "u", name: "Units", kind: "unit-sales", unitsMonth1: 100, monthlyGrowthRate: 0,
+          pricePerUnit: 50, costPerUnit: 20 },
+      ],
+    });
+    expect(driversMoved(SCENARIOS.downside.adjustment, noSubscription)).toBe(5);
+
+    // Nothing to cut and nobody to not-hire: three drivers, and the
+    // validator should say the downside is not a scenario.
+    const bare = AssumptionsSchema.parse({
+      ...saasPlan,
+      revenueStreams: [
+        { id: "u", name: "Units", kind: "unit-sales", unitsMonth1: 100, monthlyGrowthRate: 0,
+          pricePerUnit: 50, costPerUnit: 20 },
+      ],
+      roles: [],
+      opex: [],
+    });
+    expect(driversMoved(SCENARIOS.downside.adjustment, bare)).toBe(3);
+  });
 });
 
 describe("sensitivity", () => {

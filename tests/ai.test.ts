@@ -112,7 +112,10 @@ function permittedAmounts(ctx: GenerationContext): number[] {
       year.ownerCompensation, year.cogs, year.depreciation, year.interest, year.tax);
   }
   values.push(metrics.cash.lowestCash, metrics.cash.peakFundingNeed,
-    metrics.breakEven.monthlyRevenueRequired, metrics.breakEven.averageMonthlyFixedCosts);
+    metrics.breakEven.averageMonthlyFixedCosts);
+  if (metrics.breakEven.monthlyRevenueRequired !== null) {
+    values.push(metrics.breakEven.monthlyRevenueRequired);
+  }
   if (metrics.unitEconomics.lifetimeValue !== null) values.push(metrics.unitEconomics.lifetimeValue);
   if (metrics.unitEconomics.customerAcquisitionCost !== null) {
     values.push(metrics.unitEconomics.customerAcquisitionCost);

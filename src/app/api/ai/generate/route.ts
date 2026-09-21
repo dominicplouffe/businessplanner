@@ -8,6 +8,7 @@ import {
   parseResilience,
   parseSizing,
   snapshotPlan,
+  writeSection,
   PLAN_SECTIONS,
 } from "@/lib/plans";
 import { buildModel } from "@/lib/finance/engine";
@@ -106,18 +107,33 @@ export async function POST(request: Request) {
     await snapshotPlan(plan.id, `Before regenerating "${section.title}"`, "regeneration");
   }
 
-  await db.planSection.updateMany({
-    where: { planId: plan.id, key: sectionKey },
-    data: { status: "generating" },
-  });
+  await writeSection(plan.id, sectionKey, { status: "generating" });
 
   const generator = getGenerator();
   const encoder = new TextEncoder();
 
+  /** Puts the section back where it was. Guarded on `generating` so a retry
+   *  that has already started cannot have its status clobbered by a late
+   *  failure from the attempt before it. */
+  const clearGenerating = () =>
+    db.planSection.updateMany({
+      where: { planId: plan.id, key: sectionKey, status: "generating" },
+      data: { status: existing?.contentText ? "draft" : "empty" },
+    });
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      /* Non-throwing. A reader who closed the tab leaves an errored
+         controller, and `enqueue` then throws from inside the catch block
+         below — which would skip the status reset and leave the section
+         permanently "generating", and so permanently read-only in the
+         editor. A disconnected reader is not an error worth propagating. */
       const send = (event: string, data: unknown) => {
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          /* The reader is gone. The database writes still matter. */
+        }
       };
 
       try {
@@ -137,22 +153,19 @@ export async function POST(request: Request) {
               break;
             case "error":
               send("error", { message: chunk.message });
-              await db.planSection.updateMany({
-                where: { planId: plan.id, key: sectionKey },
-                data: { status: existing?.contentText ? "draft" : "empty" },
-              });
-              controller.close();
+              await clearGenerating();
+              // No close here. `finally` owns the single close: this branch
+              // used to close and then return through the finally, which
+              // closed a closed controller, threw `Invalid state` out of
+              // `start()`, and replaced the error the reader was meant to see.
               return;
           }
         }
 
-        await db.planSection.updateMany({
-          where: { planId: plan.id, key: sectionKey },
-          data: {
-            status: "draft",
-            contentText: finalText,
-            contentJson: JSON.stringify(toDocument(finalText)),
-          },
+        await writeSection(plan.id, sectionKey, {
+          status: "draft",
+          contentText: finalText,
+          contentJson: JSON.stringify(toDocument(finalText)),
         });
         await db.plan.update({
           where: { id: plan.id },
@@ -161,11 +174,19 @@ export async function POST(request: Request) {
 
         send("done", { text: finalText });
       } catch (error) {
+        // Reset before reporting: a thrown generator left the section stuck
+        // at "generating" for good, because only the two paths above cleared
+        // it and neither runs when the iteration itself throws.
+        await clearGenerating().catch(() => {});
         send("error", {
           message: error instanceof Error ? error.message : "Generation failed.",
         });
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch {
+          /* Already closed or errored by a disconnected reader. */
+        }
       }
     },
   });

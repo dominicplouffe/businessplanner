@@ -33,13 +33,10 @@ async function scopedPlan(planId: string) {
 
 /** Creating a link is a paid action; revoking one never is. Somebody who lets
  *  a subscription lapse must always be able to take a link down. */
-async function requireShareEntitlement(planId: string) {
+async function shareEntitlement(planId: string) {
   const { plan, workspaceId } = await scopedPlan(planId);
   const entitlements = await getEntitlements({ workspaceId, plan });
-  if (!entitlements.canShare) {
-    throw new Error(entitlements.blockedReason ?? "Sharing is not unlocked for this plan.");
-  }
-  return plan;
+  return { plan, entitlements };
 }
 
 const CreateSchema = z.object({
@@ -49,9 +46,23 @@ const CreateSchema = z.object({
   expiresInDays: z.number().int().min(0).max(365).default(30),
 });
 
+/**
+ * Returns the reason rather than throwing it.
+ *
+ * Next redacts a server action's error message in production and hands the
+ * client a digest, so the panel's `catch (cause) { cause.message }` rendered
+ * an opaque id where the explanation of *why* sharing is locked should be.
+ * A refusal the user is meant to read has to come back as data.
+ */
 export async function createShareLinkAction(raw: z.input<typeof CreateSchema>) {
   const input = CreateSchema.parse(raw);
-  const plan = await requireShareEntitlement(input.planId);
+  const { plan, entitlements } = await shareEntitlement(input.planId);
+  if (!entitlements.canShare) {
+    return {
+      ok: false as const,
+      reason: entitlements.blockedReason ?? "Sharing is not unlocked for this plan.",
+    };
+  }
 
   const token = randomBytes(32).toString("base64url");
   const expiresAt =

@@ -1,6 +1,7 @@
 import type { FinancialModel } from "./engine";
 import type { Metrics } from "./metrics";
 import { getBenchmark, isOutOfBand } from "./benchmarks";
+import { effectiveCurve } from "./revenue";
 import type { ModelCheck } from "@/lib/market/sizing";
 import { dscrThreshold, inForce, EQUITY_INJECTION_MINIMUM, type SbaProgramme } from "@/lib/content/regulatory";
 
@@ -437,16 +438,28 @@ export function validateModel(
      back where it started. */
 
   for (const stream of a.revenueStreams) {
-    const shape = stream.growth?.shape;
-    const legacyRate =
-      stream.kind === "subscription"
-        ? stream.newCustomerGrowthRate
-        : stream.kind === "hourly-services" || stream.kind === "contract"
-          ? 0
-          : stream.monthlyGrowthRate;
-    const declaredRate =
-      stream.growth?.shape === "unbounded" ? stream.growth.monthlyRate : null;
-    const growing = declaredRate !== null ? declaredRate > 0 : !shape && legacyRate > 0;
+    /* Judged on the curve the engine will actually project, not the one the
+       stream declares. This used to read `stream.growth` and keep a private
+       table of legacy rates beside it, and the two disagreed in a way that
+       opened a hole: that table hardcoded zero for `hourly-services`, while
+       the engine hands it a `linear` curve with no maximum built from
+       `headcountGrowthPerMonth`. The schema allows five heads a month, so a
+       consultancy could compound to three hundred billable people over the
+       horizon with nothing named and nothing blocked.
+
+       Two shapes grow without a limit. `unbounded` says so. And `linear`
+       makes `max` optional, so without one `ceilingAt` returns null,
+       `saturationAt` is null, and `capacity-never-approached` below has
+       nothing to measure either — the stream escapes every capacity rule at
+       once. `max` stays optional in the schema deliberately: requiring it
+       would fail `parseAssumptions` on stored plans that lack one, and a
+       plan that fails to parse reads as an unfinished intake. The
+       requirement belongs here, where it can be named back. */
+    const curve = effectiveCurve(stream);
+    const growing =
+      curve.shape === "unbounded"
+        ? curve.monthlyRate > 0
+        : curve.shape === "linear" && curve.perMonth > 0 && curve.max === undefined;
 
     if (growing) {
       add({

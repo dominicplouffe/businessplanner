@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { diffPlan, diffSection, diffSentences, parseSnapshot, toSentences } from "@/lib/versions";
+import {
+  RESTORE_REASON,
+  diffPlan,
+  diffSection,
+  diffSentences,
+  parseSnapshot,
+  pickRevertTarget,
+  restorePayload,
+  toSentences,
+} from "@/lib/versions";
 
 /* The diff is what turns a list of timestamps into an undo. If it moves
    unchanged text into the changed column, nobody trusts it — and a diff people
@@ -94,5 +103,87 @@ describe("reading a snapshot back", () => {
     expect(parseSnapshot("not json")).toEqual({});
     expect(parseSnapshot("null")).toEqual({});
     expect(parseSnapshot('{"sections":[]}')).toEqual({ sections: [] });
+  });
+});
+
+describe("what a restore writes back", () => {
+  const LIVE = ["executive-summary", "market"];
+  const section = (key: string) => ({
+    key,
+    status: "draft",
+    contentJson: "{}",
+    contentText: `${key} text`,
+  });
+
+  /* The regression. A snapshot carries the assumptions, the provenance
+     registry and the intake context as well as the prose, and the restore
+     wrote back only the prose. Restoring the automatic "Intake completed"
+     snapshot therefore rolled the document back to describe a model that had
+     since changed — prose and model disagreeing, which is the one failure
+     this product exists to prevent. */
+  it("takes the model back with the prose", () => {
+    const payload = restorePayload(
+      {
+        assumptions: '{"a":1}',
+        registry: '{"r":1}',
+        context: '{"c":1}',
+        sections: [section("market")],
+      },
+      LIVE,
+    );
+    expect(payload.plan).toEqual({
+      assumptionsJson: '{"a":1}',
+      registryJson: '{"r":1}',
+      contextJson: '{"c":1}',
+    });
+    expect(payload.sections).toHaveLength(1);
+  });
+
+  it("leaves a field the snapshot never carried alone rather than blanking it", () => {
+    // Absent means "this snapshot predates the field", not "it was empty".
+    // Writing "" here would erase a plan's assumptions on restoring an old
+    // version — a data-loss bug dressed as a restore.
+    const payload = restorePayload({ sections: [section("market")] }, LIVE);
+    expect(payload.plan).toEqual({});
+    expect("assumptionsJson" in payload.plan).toBe(false);
+  });
+
+  it("keeps an empty string, which is a value the plan really held", () => {
+    const payload = restorePayload({ assumptions: "" }, LIVE);
+    expect(payload.plan).toEqual({ assumptionsJson: "" });
+  });
+
+  it("does not resurrect a section the document no longer has", () => {
+    const payload = restorePayload({ sections: [section("market"), section("retired")] }, LIVE);
+    expect(payload.sections.map((s) => s.key)).toEqual(["market"]);
+  });
+});
+
+describe("which snapshot undo restores", () => {
+  const v = (id: string, reason: string) => ({ id, reason });
+
+  it("takes the most recent snapshot the author's own work produced", () => {
+    expect(pickRevertTarget([v("2", "regeneration"), v("1", "intake")])).toEqual({
+      kind: "restore",
+      versionId: "2",
+    });
+  });
+
+  /* The ping-pong. The restore takes a safety snapshot of its own before it
+     writes, so that snapshot became "most recent" — and the second click on
+     "Undo last change" restored exactly what the first click had undone. */
+  it("does not hand back the state the previous undo just removed", () => {
+    const picked = pickRevertTarget([
+      v("3", RESTORE_REASON),
+      v("2", "regeneration"),
+      v("1", "intake"),
+    ]);
+    expect(picked.kind).toBe("none");
+    if (picked.kind === "none") expect(picked.reason).toMatch(/already been undone/);
+  });
+
+  it("says so when there is nothing to undo", () => {
+    const picked = pickRevertTarget([]);
+    expect(picked).toEqual({ kind: "none", reason: "No snapshot to restore." });
   });
 });

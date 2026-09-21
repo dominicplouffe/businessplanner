@@ -57,7 +57,16 @@ export function buildFactsBlock(ctx: GenerationContext): string {
         : "not reached within the plan horizon"
     }`,
   );
-  lines.push(`- Monthly revenue needed to break even: ${money(metrics.breakEven.monthlyRevenueRequired)}`);
+  // Named rather than priced when there is no break-even. This block is the
+  // only figures a generator may use, so a rendered `$∞` would be a licence
+  // to write one into the plan.
+  lines.push(
+    `- Monthly revenue needed to break even: ${
+      metrics.breakEven.monthlyRevenueRequired === null
+        ? "not reachable — the contribution margin is not positive"
+        : money(metrics.breakEven.monthlyRevenueRequired)
+    }`,
+  );
   lines.push(`- Lowest cash balance: ${money(metrics.cash.lowestCash)} in month ${metrics.cash.lowestCashMonth}`);
   if (metrics.cash.peakFundingNeed > 0) {
     lines.push(`- Peak additional funding required: ${money(metrics.cash.peakFundingNeed)}`);

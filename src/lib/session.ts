@@ -38,7 +38,7 @@ export const getOrCreateWorkspace = cache(async (userId: string, userName: strin
   const base = slugify(userName || "workspace");
   const slug = `${base}-${Math.random().toString(36).slice(2, 8)}`;
 
-  return db.workspace.create({
+  const created = await db.workspace.create({
     data: {
       name: userName ? `${userName}'s workspace` : "My workspace",
       slug,
@@ -46,6 +46,20 @@ export const getOrCreateWorkspace = cache(async (userId: string, userName: strin
       members: { create: { userId, role: "owner" } },
     },
   });
+
+  /* Find-then-create, and nothing in the schema stops two. `cache()` dedupes
+     within one request only, so a prefetch racing a navigation on a user's
+     very first visit could create two workspaces — after which their plans
+     split across both and half of them simply stop appearing. Re-reading the
+     oldest membership settles it: both requests then agree on the same
+     workspace, and the loser's is left empty rather than holding plans
+     nobody can see. */
+  const earliest = await db.workspaceMember.findFirst({
+    where: { userId },
+    include: { workspace: true },
+    orderBy: { createdAt: "asc" },
+  });
+  return earliest?.workspace ?? created;
 });
 
 function slugify(input: string): string {

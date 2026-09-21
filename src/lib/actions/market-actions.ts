@@ -175,6 +175,8 @@ export async function saveResilienceAction(raw: { planId: string; resilience: un
 
   revalidatePath(`/plans/${plan.id}/resilience`);
   revalidatePath(`/plans/${plan.id}/review`);
+  // The overview carries the readiness score, which the assessment feeds.
+  revalidatePath(`/plans/${plan.id}`);
   return { ok: true as const };
 }
 

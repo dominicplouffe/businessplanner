@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight, Download, Pencil } from "lucide-react";
 import { AppPageHeader } from "@/components/app/page-header";
+import { ArchivePlanButton } from "@/components/app/archive-plan";
 import { ButtonLink } from "@/components/ui/button";
 import { requireUser, getOrCreateWorkspace } from "@/lib/session";
 import { getPlan, parseAssumptions, PLAN_SECTIONS } from "@/lib/plans";
@@ -200,11 +201,14 @@ export default async function PlanPage({ params }: { params: Promise<{ planId: s
           </ul>
         </section>
 
-        <p className="text-sm text-tertiary">
-          <Link href="/dashboard" className="underline-offset-4 hover:text-secondary hover:underline">
-            Back to all plans
-          </Link>
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-hairline pt-6">
+          <p className="text-sm text-tertiary">
+            <Link href="/dashboard" className="underline-offset-4 hover:text-secondary hover:underline">
+              Back to all plans
+            </Link>
+          </p>
+          <ArchivePlanButton planId={plan.id} />
+        </div>
       </div>
     </>
   );

@@ -172,6 +172,7 @@ export function SbaLoanCalculator({ buildDate }: { buildDate: string }) {
               effectiveFrom={r.minimumInjection.effectiveFrom}
               effectiveTo={r.minimumInjection.effectiveTo}
               confidence={r.minimumInjection.confidence}
+              stale={r.minimumInjection.stale}
             />
             <ConfigNote
               label={`${PROGRAMME_LABEL[r.programme]} coverage threshold`}
@@ -180,6 +181,7 @@ export function SbaLoanCalculator({ buildDate }: { buildDate: string }) {
               effectiveFrom={r.threshold.effectiveFrom}
               effectiveTo={r.threshold.effectiveTo}
               confidence={r.threshold.confidence}
+              stale={r.threshold.stale}
             />
             <ConfigNote
               label="7(a) Small Loan ceiling"
@@ -188,6 +190,7 @@ export function SbaLoanCalculator({ buildDate }: { buildDate: string }) {
               effectiveFrom={r.ceiling.effectiveFrom}
               effectiveTo={r.ceiling.effectiveTo}
               confidence={r.ceiling.confidence}
+              stale={r.ceiling.stale}
             />
             <p className="text-xs leading-relaxed text-tertiary">
               Configuration last reviewed {CONFIG_VINTAGE.lastReviewed}. Every figure above

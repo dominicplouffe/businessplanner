@@ -5,6 +5,7 @@ import {
   grantUnlock,
   recordWebhookEvent,
   rememberStripeCustomer,
+  shouldHandleDelivery,
   stripeClient,
   upsertSubscription,
 } from "@/lib/billing";
@@ -22,8 +23,11 @@ import { db } from "@/lib/db";
       not be able to unlock a plan, which is exactly what it could do if we
       trusted the JSON.
    2. **Idempotent.** Stripe retries any delivery that is not answered 2xx, and
-      it retries for days. Every handler is keyed on the event id, so a
-      redelivery is recorded and ignored rather than granting twice.
+      it retries for days. Every handler is keyed on the event id — a unique
+      index on `Purchase.stripeEventId`, an upsert for subscriptions — so a
+      redelivery cannot grant twice. The `WebhookEvent` row records what
+      happened; it deliberately does not decide what happens, because a
+      delivery that failed halfway must be allowed to run again.
    3. **Forgiving about what it does not know.** An unrecognised event type is
       recorded and answered 200. Returning an error would make Stripe retry an
       event we are never going to handle, forever.
@@ -46,14 +50,19 @@ export async function POST(request: NextRequest) {
   }
 
   const seen = await recordWebhookEvent({ stripeEventId: event.id, type: event.type });
-  if (!seen.firstDelivery) {
+  if (!shouldHandleDelivery(seen)) {
     return NextResponse.json({ received: true, duplicate: true });
   }
 
   try {
     const note = await handle(event);
-    await db.webhookEvent.update({
-      where: { stripeEventId: event.id },
+    /* Never downgrade a `processed` row. Two deliveries of the same event can
+       now both reach the handler — which is the point, and safe, because the
+       grant is locked by a unique index. But the loser records "already
+       recorded" as `ignored`, and overwriting the winner's `processed` with
+       that would make the audit trail say the entitlement was never granted. */
+    await db.webhookEvent.updateMany({
+      where: { stripeEventId: event.id, outcome: { not: "processed" } },
       data: { outcome: note.handled ? "processed" : "ignored", note: note.note },
     });
     return NextResponse.json({ received: true });
@@ -64,8 +73,11 @@ export async function POST(request: NextRequest) {
       data: { outcome: "failed", note: message },
     });
     // 500 so Stripe retries: the event was real and we failed to act on it.
-    // The recorded row is updated rather than deleted, so the retry is seen as
-    // a duplicate — which is why the retry path also re-checks Purchase.
+    // The row is marked `failed` rather than deleted, so the audit trail keeps
+    // the attempt — and `shouldHandleDelivery` lets the retry back into the
+    // handler, because only a terminal outcome means the work is done. The
+    // unique index on Purchase.stripeEventId is what stops the retry granting
+    // twice; this row never was.
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

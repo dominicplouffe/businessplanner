@@ -52,6 +52,49 @@ export async function createPlan(input: {
   });
 }
 
+/** A Prisma client or a transaction client — the writes below work on either. */
+type Db = typeof db | Parameters<Parameters<typeof db.$transaction>[0]>[0];
+
+/**
+ * Writes a section, creating the row if the plan predates the section.
+ *
+ * `createPlan` seeds the skeleton, and that used to be the only place a
+ * `PlanSection` row was ever created — every other write was an `updateMany`
+ * keyed on `{planId, key}`. A row matching nothing is not an error in Prisma,
+ * so adding a fourteenth entry to `PLAN_SECTIONS` would give every plan
+ * created before it a page that renders, accepts text, reports "Saved", and
+ * silently keeps nothing.
+ *
+ * An unknown key is still an update rather than an insert: a section the
+ * document no longer has must not be resurrected by a stale snapshot.
+ */
+export async function writeSection(
+  planId: string,
+  key: string,
+  data: { status?: string; contentJson?: string; contentText?: string },
+  client: Db = db,
+): Promise<void> {
+  const index = PLAN_SECTIONS.findIndex((s) => s.key === key);
+  if (index === -1) {
+    await client.planSection.updateMany({ where: { planId, key }, data });
+    return;
+  }
+  await client.planSection.upsert({
+    where: { planId_key: { planId, key } },
+    create: {
+      planId,
+      key,
+      title: PLAN_SECTIONS[index]!.title,
+      position: index,
+      status: "empty",
+      contentJson: "",
+      contentText: "",
+      ...data,
+    },
+    update: data,
+  });
+}
+
 export async function listPlans(workspaceId: string): Promise<PlanSummary[]> {
   return db.plan.findMany({
     where: { workspaceId, status: { not: "archived" } },

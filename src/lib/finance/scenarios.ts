@@ -46,15 +46,31 @@ export const SCENARIOS: Record<ScenarioKey, { label: string; description: string
   },
 };
 
-/** Count of drivers a scenario actually moves — the validator checks this. */
-export function driversMoved(adj: ScenarioAdjustment): number {
+/**
+ * Count of drivers a scenario actually moves — the validator checks this.
+ *
+ * With `a` supplied, a driver only counts when the plan has something for it
+ * to act on. Without it the count is a property of `SCENARIOS` alone, which
+ * is a module constant — so `no-coherent-downside` was comparing a
+ * compile-time 6 against a threshold of 5 and could never fire. A blocking
+ * check that cannot block is worse than no check, because it reads as
+ * coverage. Scaling payroll on a plan with no roles moves nothing, and
+ * telling its author their downside is coherent is exactly the false comfort
+ * the rule exists to prevent.
+ */
+export function driversMoved(adj: ScenarioAdjustment, a?: Assumptions): number {
+  const hasRevenue = !a || a.revenueStreams.length > 0;
+  const hasOpex = !a || a.opex.length > 0;
+  const hasPayroll = !a || a.roles.length > 0;
+  const hasChurn = !a || a.revenueStreams.some((s) => s.kind === "subscription");
+
   let count = 0;
-  if (adj.volume !== 1) count++;
-  if (adj.price !== 1) count++;
-  if (adj.opex !== 1) count++;
-  if (adj.payroll !== 1) count++;
-  if (adj.churnDelta !== 0) count++;
-  if (adj.rampDelayMonths !== 0) count++;
+  if (adj.volume !== 1 && hasRevenue) count++;
+  if (adj.price !== 1 && hasRevenue) count++;
+  if (adj.opex !== 1 && hasOpex) count++;
+  if (adj.payroll !== 1 && hasPayroll) count++;
+  if (adj.churnDelta !== 0 && hasChurn) count++;
+  if (adj.rampDelayMonths !== 0 && hasRevenue) count++;
   return count;
 }
 

@@ -37,11 +37,32 @@ pnpm db:push      # apply the schema locally (migrations are what production run
 
 ## Conventions that are load-bearing
 
+**Write a section through `writeSection()`, never `updateMany`.** `createPlan`
+seeds the skeleton, so a section added to `PLAN_SECTIONS` afterwards exists on
+no plan created before it — and an `updateMany` matching zero rows is not an
+error, so the page rendered, took the text, said "Saved" and kept nothing.
+`writeSection` upserts on `@@unique([planId, key])`, which makes adding a
+section safe for existing plans. The one `updateMany` left is the guarded
+`status: "generating"` reset, and `tests/section-writes.test.ts` keeps it that
+way.
+
 **Never hardcode a regulatory value.** DSCR thresholds, EB-5 investment minimums,
 Section 179 limits, the FICA wage base — all live in
 `src/lib/content/regulatory/` with an effective-date range, a source, and a
 `confidence` field. Read them through `inForce()`. This is not hypothetical: SOP
 50 10 8.1 takes effect 2026-10-01, and the EB-5 thresholds adjust 2027-01-01.
+
+`inForce()` returns `stale: true` when nothing is in force and it has fallen
+back to the last entry on record. It does not throw — going down on a date
+nobody wrote down is worse — but every surface that shows a regulatory figure
+must say so, and `staleSeries()` names any series that has run out. The
+comparison is made in `America/New_York`, because these are US federal
+effective dates and UTC turns a threshold over up to seven hours early.
+
+The payroll load is one of these values, not a constant in the schema:
+`PayrollSchema` takes its defaults from `PAYROLL_LOAD` and `FICA_WAGE_BASE`
+through `inForce()`, as *functions* so the date is not frozen at import. An
+author's own figure still wins.
 
 **Growth has a ceiling, always.** `src/lib/finance/growth.ts` projects volume
 logistically toward a capacity the author has to name, and every stream carries
@@ -69,6 +90,16 @@ derive its headcount from volume. Heads round *up* and ratchet by default —
 without the ratchet a seasonal business dismisses its crew every February.
 `hourly-services` used to grow billable heads to produce revenue and charge
 nothing for them; a role staffed by `billable-heads` now pays for them.
+
+The load is charged in two parts because only one of them is capped. Benefits
+and the Medicare half apply to every dollar; the OASDI half stops once a head
+has earned `taxableWageBase` within a **calendar** year, which is why the
+accumulator resets on the calendar rather than on the model's own year one. A
+flat `1 + payrollTaxRate + benefitsRate` invented roughly $7k a year of
+employer tax on every high earner. `xlsx.ts` emits the same piecewise
+arithmetic — a capped engine against a flat workbook is the two disagreeing on
+the first big salary, which is exactly what `tests/xlsx.test.ts` exists to
+catch.
 
 **Round at the edge, never in the ledger.** Rounding inside the amortisation
 schedule once made principal repayments differ from the amount drawn, which broke
@@ -204,8 +235,16 @@ the dev path exercises the real grant instead of going round it.
 
 **Idempotency is the unique index, not a check.** Stripe retries anything that is
 not answered 2xx, for days. `Purchase.stripeEventId` is unique and that
-constraint is the lock; `WebhookEvent` does the same job for every other event
-type and doubles as the audit trail for "why did my entitlement change".
+constraint is the lock; `WebhookEvent` is the audit trail for "why did my
+entitlement change", and it deliberately does **not** decide whether a delivery
+runs. It once did — `if (!seen.firstDelivery) return 200` — and because the row
+is written *before* the handler, a handler that threw answered 500 to make
+Stripe retry and the retry then matched the row its own failure had written.
+One transient database error took the money and left the plan locked, for good.
+`shouldHandleDelivery()` skips a delivery only on a terminal outcome
+(`processed`, `ignored`); `failed`, `pending` and anything unrecognised run
+again, because every handler is idempotent and the two failure modes are not
+symmetric.
 
 **An event we will never handle gets a 200.** Returning an error makes Stripe
 retry forever. A cross-workspace grant, missing metadata or an unknown type is
@@ -231,6 +270,19 @@ diffs at the **sentence** level with an LCS walk: prose regenerates wholesale, a
 word-level diff of two independently written paragraphs is confetti, and a
 positional comparison marks an insertion's neighbours as rewritten. A diff people
 do not trust is worse than no diff.
+
+**A snapshot is the plan, not the prose.** It carries the assumptions, the
+registry and the intake context as well as the sections, and `restorePayload()`
+writes all four back in one transaction. Restoring only the prose put the
+document and the model into disagreement — the thing this product exists to
+prevent — and because the sentence diff cannot see a change in the numbers, the
+history page reports `modelChanged` separately so a model-only snapshot can
+still be restored. A field absent from an older snapshot is left alone rather
+than written as a blank.
+
+The safety snapshot a restore takes first carries `reason: "restore"`, and
+`pickRevertTarget()` skips it. Without that, "Undo last change" grabbed the
+snapshot it had just created and a second click redid the thing you undid.
 
 ## Exports
 
@@ -484,6 +536,19 @@ revenue-per-employee rule blocks on an absolute sanity bound and warns only
 where a sourced band exists. Populating the other nineteen needs real sources,
 not estimates — a band that names no source is the thing this project does not
 do.
+
+**Two dated values the config names and does not yet hold.** There is no
+2026-10-01 entry in `DSCR_THRESHOLDS` for SOP 50 10 8.1, and no Section 179 or
+bonus-depreciation config at all, although both are named above and in
+`CONFIG_VINTAGE.verificationQueue`. Neither can be filled from an estimate. The
+EB-5 minimums expire 2027-01-01 with no successor published; `inForce()` now
+reports that as `stale` rather than serving the old figure as current, which is
+the honest interim.
+
+`cap-table.ts` is reachable from no page or action. Its arithmetic is correct
+and tested — SAFEs convert on a post-money cap against the converted table, and
+the priced investor gets the percentage it negotiated — but nothing renders it
+yet, so read the tests before wiring it up.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

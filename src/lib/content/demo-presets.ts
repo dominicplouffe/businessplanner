@@ -117,6 +117,10 @@ export const DEMO_PRESETS: DemoPreset[] = [
           id: "s", name: "Client engagements", kind: "hourly-services",
           billableHeadcount: heads, hoursPerHeadPerMonth: 160, utilisation: 0.68,
           hourlyRate: rate, headcountGrowthPerMonth: 0.1, cogsPercent: 0.05,
+          // The size this practice intends to reach. A demo of a product whose
+          // rule is "growth has a ceiling, always" cannot itself grow head
+          // count forever — and without a max the validator now says so.
+          growth: { shape: "linear" as const, perMonth: 0.1, max: Math.max(heads + 6, 12) },
         },
       ],
       roles: [

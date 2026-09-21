@@ -33,7 +33,18 @@ export type StreamResult = {
  * the same arithmetic the engine has always done. That fallback is what lets
  * the curve be introduced without moving a number; it is also exactly what
  * `growth-declared-unbounded` refuses to export.
+ *
+ * Exported because `validate.ts` has to judge the curve the engine actually
+ * projects on, not the one the stream declares. It used to inspect
+ * `stream.growth` and keep its own table of legacy rates, and the two
+ * disagreed: that table hardcoded zero for `hourly-services`, while this
+ * function hands it a max-less linear curve that grows head count forever.
+ * One source of truth, so they cannot drift again.
  */
+export function effectiveCurve(stream: RevenueStream): GrowthCurve {
+  return curveFor(stream);
+}
+
 function curveFor(stream: RevenueStream): GrowthCurve {
   if (stream.growth) return stream.growth;
   switch (stream.kind) {

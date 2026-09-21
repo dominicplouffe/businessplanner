@@ -42,11 +42,16 @@ export function VersionBrowser({
   versions,
   selectedId,
   diff,
+  modelChanged = false,
 }: {
   planId: string;
   versions: VersionRow[];
   selectedId: string | null;
   diff: PlanDiff | null;
+  /** The snapshot's assumptions differ from the plan's, which the sentence
+   *  diff cannot show. A restore carries those back too, so it must be
+   *  offered even when not a word of prose has changed. */
+  modelChanged?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -162,7 +167,9 @@ export function VersionBrowser({
                   </h2>
                   <p className="mt-1 text-sm text-secondary">
                     {diff.changedCount === 0 ? (
-                      "Nothing has changed since this snapshot."
+                      modelChanged
+                        ? "No prose has changed, but the assumptions behind it have. Restoring brings the model back too."
+                        : "Nothing has changed since this snapshot."
                     ) : (
                       <>
                         <span className="numeric">{diff.changedCount}</span>{" "}
@@ -177,7 +184,7 @@ export function VersionBrowser({
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={pending || diff.changedCount === 0}
+                  disabled={pending || (diff.changedCount === 0 && !modelChanged)}
                   onClick={() => restore(selected.id)}
                 >
                   <RotateCcw aria-hidden className="size-3.5" />

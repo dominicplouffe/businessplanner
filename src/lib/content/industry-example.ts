@@ -3,7 +3,8 @@ import { computeMetrics } from "@/lib/finance/metrics";
 import { validateModel } from "@/lib/finance/validate";
 import { benchmarkFor, type IndustryPage } from "@/lib/content/industries";
 import type { IndustryBenchmark } from "@/lib/finance/benchmarks";
-import type { RevenueStream } from "@/lib/finance/types";
+import { AssumptionsSchema, type RevenueStream } from "@/lib/finance/types";
+import { SCENARIOS, driversMoved } from "@/lib/finance/scenarios";
 
 /* ==========================================================================
    The worked example behind an industry page.
@@ -144,7 +145,8 @@ function headcountAtMonth(
 }
 
 export function buildIndustryExample(page: IndustryPage): IndustryExample {
-  const model = buildModel(page.build());
+  const assumptions = AssumptionsSchema.parse(page.build());
+  const model = buildModel(assumptions);
   const metrics = computeMetrics(model);
   const benchmark = benchmarkFor(page);
   const validation = validateModel(model, metrics, {
@@ -156,7 +158,10 @@ export function buildIndustryExample(page: IndustryPage): IndustryExample {
     competitorCount: 3,
     competitorsHaveDatedEvidence: true,
     hasBottomUpMarketSizing: true,
-    downsideScenarioDriverCount: 6,
+    // Computed against this example, not asserted. Hardcoding 6 insulated
+    // every worked example from the very check it is supposed to demonstrate
+    // passing — and once the count became plan-aware, the constant was a lie.
+    downsideScenarioDriverCount: driversMoved(SCENARIOS.downside.adjustment, assumptions),
     uncitedStatisticCount: 0,
     unreconciledFigureCount: 0,
   });

@@ -46,11 +46,25 @@ export default async function VersionsPage({
     ? await db.planVersion.findFirst({ where: { id: selectedId, planId: plan.id } })
     : null;
 
+  // Parsed once, not once per section: this sat inside the map below, so a
+  // thirteen-section plan parsed the same JSON thirteen times per render.
+  const snapshot = selected ? parseSnapshot(selected.snapshotJson) : null;
+
+  /* Whether the snapshot's *model* differs, which the sentence diff cannot
+     see. A restore now carries the assumptions back as well as the prose, so
+     gating the button on changed sentences alone made a snapshot that
+     differs only in its numbers impossible to restore. */
+  const modelChanged = Boolean(
+    snapshot &&
+      ((snapshot.assumptions !== undefined && snapshot.assumptions !== plan.assumptionsJson) ||
+        (snapshot.registry !== undefined && snapshot.registry !== plan.registryJson) ||
+        (snapshot.context !== undefined && snapshot.context !== plan.contextJson)),
+  );
+
   const diff = selected
     ? diffPlan(
         PLAN_SECTIONS.map((section) => {
-          const snapshot = parseSnapshot(selected.snapshotJson);
-          const before = snapshot.sections?.find((s) => s.key === section.key)?.contentText ?? "";
+          const before = snapshot?.sections?.find((s) => s.key === section.key)?.contentText ?? "";
           const after = plan.sections.find((s) => s.key === section.key)?.contentText ?? "";
           return { key: section.key, title: section.title, before, after };
         }),
@@ -80,6 +94,7 @@ export default async function VersionsPage({
           }))}
           selectedId={selectedId}
           diff={diff}
+          modelChanged={modelChanged}
         />
 
         <p className="text-sm text-tertiary">

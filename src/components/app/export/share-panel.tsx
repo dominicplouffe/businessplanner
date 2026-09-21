@@ -52,11 +52,21 @@ export function SharePanel({
     setError(null);
     startTransition(async () => {
       try {
-        await createShareLinkAction({ planId, label, expiresInDays: Number(expiresInDays) });
+        const result = await createShareLinkAction({
+          planId,
+          label,
+          expiresInDays: Number(expiresInDays),
+        });
+        // A refusal comes back as data, because Next redacts a thrown
+        // message in production and the reason is the point of saying it.
+        if (!result.ok) {
+          setError(result.reason);
+          return;
+        }
         setLabel("");
         setCreating(false);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Could not create the link.");
+      } catch {
+        setError("Could not create the link.");
       }
     });
   };

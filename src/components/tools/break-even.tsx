@@ -107,7 +107,9 @@ export function BreakEvenCalculator() {
             note={
               r.contribution <= 0
                 ? "Every sale loses money before any fixed cost is paid. No volume fixes that — the price or the unit cost has to move."
-                : unitsNeeded !== null && Number.isFinite(unitsNeeded)
+                : unitsNeeded !== null &&
+                    Number.isFinite(unitsNeeded) &&
+                    be.monthlyRevenueRequired !== null
                   ? `${formatCurrency(be.monthlyRevenueRequired, "USD", {
                       decimals: 0,
                     })} of revenue a month. You are starting at ${formatNumber(monthlyUnitsAtStart)}.`

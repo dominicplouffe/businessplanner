@@ -6,6 +6,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { requireUser, getOrCreateWorkspace } from "@/lib/session";
 import { listPlans, PLAN_SECTIONS, type PlanSummary } from "@/lib/plans";
 import { getBenchmark } from "@/lib/finance/benchmarks";
+import { TOTAL_STEPS } from "@/lib/content/intake";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -88,9 +89,12 @@ function PlanGrid({ plans }: { plans: PlanSummary[] }) {
     <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {plans.map((plan) => {
         const status = STATUS_COPY[plan.status] ?? STATUS_COPY.draft!;
+        // Derived, not typed in. The denominator was a hardcoded 8, correct
+        // only by coincidence — TOTAL_STEPS is 9 once Review is counted, and
+        // adding a step would have made the bar read full before intake was.
         const progress = plan.intakeComplete
           ? 1
-          : Math.min(1, plan.intakeStep / 8);
+          : Math.min(1, plan.intakeStep / TOTAL_STEPS);
         const benchmark = getBenchmark(plan.industryKey);
 
         return (
