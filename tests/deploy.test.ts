@@ -50,12 +50,18 @@ describe("the keys the script collects", () => {
   });
 
   it("does not ask for DATABASE_URL", () => {
-    // It comes from the RDS-managed secret's `uri` field. Asking for it invites
-    // a second copy of the password that a rotation will not update.
+    /* It is composed in `docker-entrypoint.sh` from the database's own
+       credentials and endpoint. Collecting it here would invite a second copy of
+       a password that a rotation does not update.
+
+       This test previously asserted the stack read a `uri` key off the database
+       secret, which was the bug: it pinned the wrong arrangement in place rather
+       than checking anything. The cross-check that catches it is in "the
+       regression the sixth deploy was". */
     expect(SECRET_KEYS).not.toContain("DATABASE_URL");
-    expect(readFileSync("infra/lib/site-stack.ts", "utf8")).toContain(
-      'fromSecretsManager(dbSecret, "uri")',
-    );
+    const stack = readFileSync("infra/lib/site-stack.ts", "utf8");
+    expect(stack).not.toContain('fromSecretsManager(dbSecret, "uri")');
+    expect(stack).toContain('fromSecretsManager(dbSecret, "password")');
   });
 
   it("treats only the Anthropic key as optional", () => {
@@ -318,6 +324,75 @@ describe("the preflight that would have caught the failure", () => {
         { EngineVersion: "17.4", MultiAZCapable: true, SupportsPerformanceInsights: true },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("the regression the sixth deploy was", () => {
+  /* Every task died before it started:
+
+       ResourceInitializationError: unable to pull secrets or registry auth:
+       retrieved secret from Secrets Manager did not contain json key uri
+
+     The task definition asked for a `uri` key on the database secret. There is
+     no such key and there never was: the secret is generated here with
+     `username` and `password`, and attaching it to the instance adds `host`,
+     `port`, `dbname` and friends. Nothing in RDS or Secrets Manager composes a
+     connection URL.
+
+     So the rule is the one that would have caught it: a key read out of a
+     secret has to be a key that secret contains. */
+  const stack = () => readFileSync("infra/lib/site-stack.ts", "utf8");
+
+  it("reads only the keys the database secret actually has", () => {
+    const source = stack();
+
+    // What the secret is created with, taken from the construct rather than
+    // restated — a hardcoded pair here could agree with itself and be wrong.
+    const template = /secretStringTemplate: JSON\.stringify\(\{ ([A-Za-z]+):/.exec(source);
+    const generated = /generateStringKey: "([A-Za-z]+)"/.exec(source);
+    expect(template?.[1], "could not find the secret's template").toBeTruthy();
+    expect(generated?.[1], "could not find the generated key").toBeTruthy();
+    const exists = [template![1]!, generated![1]!].sort();
+
+    const read = [...source.matchAll(/fromSecretsManager\(dbSecret,\s*"([A-Za-z_]+)"\)/g)]
+      .map((m) => m[1]!)
+      .sort();
+
+    expect(read.length, "the database secret is not read at all").toBeGreaterThan(0);
+    for (const key of read) {
+      expect(exists, `the database secret has no "${key}" key`).toContain(key);
+    }
+  });
+
+  it("takes the endpoint from the construct, not from the secret", () => {
+    // host/port/dbname are added to the secret only by the attachment. Reading
+    // them off the database construct is one less thing that has to be there,
+    // and an endpoint in an isolated subnet is not a credential.
+    expect(stack()).toContain("DB_HOST: database.dbInstanceEndpointAddress");
+    expect(stack()).toContain("DB_PORT: database.dbInstanceEndpointPort");
+  });
+
+  it("composes the connection URL in the entrypoint, and lets an explicit one win", () => {
+    const entrypoint = readFileSync("docker-entrypoint.sh", "utf8");
+    expect(entrypoint).toContain('if [ -z "$DATABASE_URL" ] && [ -n "$DB_HOST" ]; then');
+    expect(entrypoint).toMatch(
+      /export DATABASE_URL="postgresql:\/\/\$\{DB_USERNAME\}:\$\{DB_PASSWORD\}@\$\{DB_HOST\}:\$\{DB_PORT\}\/\$\{DB_NAME\}"/,
+    );
+    // Still refuses to start without one, which is what keeps a task from
+    // serving traffic against a schema nobody migrated.
+    expect(entrypoint).toContain("Refusing to start.");
+  });
+
+  it("keeps the password free of characters that would break that URL", () => {
+    /* Interpolating the password straight into the URL is safe only because the
+       generated password excludes every character significant in one. Relaxing
+       this set without encoding in the entrypoint gives a connection string that
+       parses and points somewhere else. */
+    // The literal contains an escaped quote, so the match has to span escapes.
+    const excluded = /excludeCharacters:\s*"((?:[^"\\]|\\.)*)"/.exec(stack())?.[1] ?? "";
+    for (const ch of ["/", "@", ":", "?", "#", "%"]) {
+      expect(excluded, `${ch} must be excluded from the generated password`).toContain(ch);
+    }
   });
 });
 

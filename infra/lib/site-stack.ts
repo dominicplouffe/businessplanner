@@ -225,11 +225,36 @@ export class SiteStack extends Stack {
         NEXT_PUBLIC_SITE_URL: `https://${domainName}`,
         BETTER_AUTH_URL: `https://${domainName}`,
         CHROMIUM_EXECUTABLE_PATH: "/usr/bin/chromium",
+
+        /* Where the database is. Not secret — an endpoint in a private isolated
+           subnet is not reachable without the credentials above, and taking it
+           from the construct rather than from the secret's attached fields means
+           one less thing that has to be there. `docker-entrypoint.sh` composes
+           DATABASE_URL from these five. */
+        DB_HOST: database.dbInstanceEndpointAddress,
+        DB_PORT: database.dbInstanceEndpointPort,
+        DB_NAME: "venturelly",
       },
       secrets: {
-        // Assembled from the RDS-managed secret so a rotation does not need a
-        // second value updating in step.
-        DATABASE_URL: ecs.Secret.fromSecretsManager(dbSecret, "uri"),
+        /* The credentials, and only the credentials.
+
+           This asked for a `uri` key, and the tasks could not start:
+
+               ResourceInitializationError: unable to pull secrets or registry
+               auth: retrieved secret from Secrets Manager did not contain json
+               key uri
+
+           There is no such key and there never was. `dbSecret` is generated
+           here with `username` and `password`; attaching it to the instance adds
+           `engine`, `host`, `port`, `dbname` and `dbInstanceIdentifier`. Nothing
+           in RDS or Secrets Manager composes a connection URL.
+
+           So only the two keys this stack actually creates are read as secrets,
+           and the rest of the connection comes from the construct as plain
+           environment — see below. That also means this no longer depends on
+           what the attachment happens to add. */
+        DB_USERNAME: ecs.Secret.fromSecretsManager(dbSecret, "username"),
+        DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, "password"),
         BETTER_AUTH_SECRET: ecs.Secret.fromSecretsManager(appSecret, "BETTER_AUTH_SECRET"),
         STRIPE_SECRET_KEY: ecs.Secret.fromSecretsManager(appSecret, "STRIPE_SECRET_KEY"),
         STRIPE_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(appSecret, "STRIPE_WEBHOOK_SECRET"),

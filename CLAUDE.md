@@ -396,6 +396,28 @@ replaced once the service is up. Nothing may report the deploy finished while
 that placeholder is in place: the webhook is the only code that grants an
 entitlement.
 
+**A key read out of a secret has to be a key that secret contains.** The task
+definition asked for `uri` on the database secret and every task died before
+starting:
+
+    ResourceInitializationError: unable to pull secrets or registry auth:
+    retrieved secret from Secrets Manager did not contain json key uri
+
+There is no such key and there never was. `dbSecret` is generated with
+`username` and `password`; attaching it to the instance adds `host`, `port`,
+`dbname` and `dbInstanceIdentifier`. Nothing in RDS or Secrets Manager composes
+a connection URL. So only `username` and `password` are read as secrets, the
+endpoint comes off the `database` construct as plain environment — an address in
+an isolated subnet is not a credential — and `docker-entrypoint.sh` assembles
+`DATABASE_URL` from the five, letting an explicit one win so `docker-compose`
+and every local run are unaffected.
+
+Interpolating the password straight into that URL is safe **by construction**:
+`excludeCharacters` on `DbSecret` removes every character significant in a URL.
+Relaxing that set without encoding in the entrypoint yields a connection string
+that parses and points somewhere else. `tests/deploy.test.ts` checks both — the
+keys read against the keys created, and the excluded set.
+
 **Check the daemon, not the client.** `docker --version` prints the client's own
 version and contacts nothing, so it succeeded on a machine where the socket was
 root-only — `✓ Docker version 29.7.2` printed immediately before `permission
