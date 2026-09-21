@@ -38,6 +38,23 @@ export const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://getventurel
   "",
 );
 
+/**
+ * The Stripe prices checkout charges against.
+ *
+ * Price ids and not amounts: the amount lives in Stripe, which is what makes
+ * the catalogue reportable and lets a promotion code or a tax rule attach to
+ * something. The risk that buys is a second copy of the number — `pricing` in
+ * `brand.ts` is what the marketing site renders, and Stripe is what the card
+ * is actually charged, so the two can disagree and nothing in the app would
+ * notice. `node scripts/stripe-verify.mjs` is the check that they have not.
+ *
+ * Environment rather than source because a price id is mode-specific: the test
+ * ids do not exist in live and vice versa, so a hardcoded one is a checkout
+ * that works in exactly one of the two.
+ */
+export const stripePriceUnlock = process.env.STRIPE_PRICE_UNLOCK ?? "";
+export const stripePriceLive = process.env.STRIPE_PRICE_LIVE ?? "";
+
 /** What must be present before production traffic is served. */
 const REQUIRED_IN_PRODUCTION = [
   ["DATABASE_URL", process.env.DATABASE_URL],
@@ -78,6 +95,33 @@ export function assertProductionEnv(): void {
       "Refusing to start: STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET are both required in " +
         "production. Without them billing falls back to a development provider that grants " +
         "entitlements without payment, which must never run here.",
+    );
+  }
+
+  /* Same reasoning one level down. Checkout names these prices, so a missing
+     one is not a degraded checkout, it is Stripe rejecting the session — and
+     it would surface as a customer clicking Buy and getting an error, which is
+     the most expensive place to find out. */
+  const prices = [
+    ["STRIPE_PRICE_UNLOCK", stripePriceUnlock],
+    ["STRIPE_PRICE_LIVE", stripePriceLive],
+  ] as const;
+  const unpriced = prices.filter(([, value]) => !value).map(([name]) => name);
+  if (unpriced.length > 0) {
+    throw new Error(
+      `Refusing to start: ${unpriced.join(", ")} ${unpriced.length === 1 ? "is" : "are"} not set. ` +
+        "Checkout charges against a Stripe price id rather than an amount. Create the catalogue " +
+        "and read the ids back with `node scripts/stripe-verify.mjs`.",
+    );
+  }
+
+  /* A live deployment pointed at test prices takes no money and reports no
+     error worth reading, so it is worth the two lines to refuse it. */
+  const testPrices = prices.filter(([, value]) => value.startsWith("price_test_"));
+  if (testPrices.length > 0) {
+    throw new Error(
+      `Refusing to start: ${testPrices.map(([name]) => name).join(", ")} looks like a test-mode ` +
+        "price id. A production checkout against a test price cannot be paid.",
     );
   }
 }

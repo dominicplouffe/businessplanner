@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "stripe:verify": "node scripts/stripe-verify.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:push": "prisma db push",

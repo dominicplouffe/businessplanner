@@ -1,6 +1,6 @@
 import "server-only";
 import Stripe from "stripe";
-import { brand, pricing } from "@/lib/brand";
+import { stripePriceLive, stripePriceUnlock } from "@/lib/env";
 
 /* ==========================================================================
    The billing seam.
@@ -72,19 +72,18 @@ export class StripeBilling implements Billing {
       success_url: request.successUrl,
       cancel_url: request.cancelUrl,
       ...customerFields(request),
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: "usd",
-            unit_amount: pricing.unlock.price * 100,
-            product_data: {
-              name: `${brand.name} — ${pricing.unlock.name}`,
-              description: `Export and sharing for “${request.planTitle}”. One payment, no renewal.`,
-            },
-          },
-        },
-      ],
+      /* A catalogue price rather than an inline one. `price_data` built a
+         fresh Product on every session, so the dashboard accumulated one per
+         sale and revenue could not be grouped by what was sold. The amount now
+         lives in Stripe; `scripts/stripe-verify.mjs` is what keeps it equal to
+         `pricing` in `brand.ts`, which is still what the site renders. */
+      line_items: [{ quantity: 1, price: stripePriceUnlock }],
+      /* The plan title moved here because a shared price cannot carry it. It
+         is what the customer reads on the Stripe page and on the receipt, and
+         "Export and sharing" with no plan named is a worse receipt. */
+      custom_text: {
+        submit: { message: `Unlocks export and sharing for “${request.planTitle}”.` },
+      },
       // Read back on the webhook. The plan id is NOT trusted from the success
       // URL: anybody can visit that, and only the webhook is signed.
       metadata: { workspaceId: request.workspaceId, planId: request.planId, kind: "unlock" },
@@ -104,20 +103,7 @@ export class StripeBilling implements Billing {
       success_url: request.successUrl,
       cancel_url: request.cancelUrl,
       ...customerFields(request),
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: "usd",
-            unit_amount: pricing.live.price * 100,
-            recurring: { interval: "month" },
-            product_data: {
-              name: `${brand.name} — ${pricing.live.name}`,
-              description: "Actuals tracking, re-forecasting and lender updates. Cancel any time.",
-            },
-          },
-        },
-      ],
+      line_items: [{ quantity: 1, price: stripePriceLive }],
       metadata: { workspaceId: request.workspaceId, kind: "subscription" },
       subscription_data: { metadata: { workspaceId: request.workspaceId } },
     });

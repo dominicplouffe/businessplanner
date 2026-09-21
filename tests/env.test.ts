@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const ORIGINAL = { ...process.env };
 
 function setEnv(values: Record<string, string | undefined>) {
-  for (const key of ["NODE_ENV", "DATABASE_URL", "BETTER_AUTH_SECRET", "NEXT_PUBLIC_SITE_URL", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]) {
+  for (const key of ["NODE_ENV", "DATABASE_URL", "BETTER_AUTH_SECRET", "NEXT_PUBLIC_SITE_URL", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_UNLOCK", "STRIPE_PRICE_LIVE"]) {
     delete process.env[key];
   }
   for (const [key, value] of Object.entries(values)) {
@@ -30,6 +30,8 @@ const COMPLETE = {
   NEXT_PUBLIC_SITE_URL: "https://example.com",
   STRIPE_SECRET_KEY: "sk_live_x",
   STRIPE_WEBHOOK_SECRET: "whsec_x",
+  STRIPE_PRICE_UNLOCK: "price_live_unlock",
+  STRIPE_PRICE_LIVE: "price_live_monthly",
 };
 
 async function assertWith(values: Record<string, string | undefined>) {
@@ -79,6 +81,24 @@ describe("assertProductionEnv", () => {
       expect(run).toThrow(/without payment/);
     },
   );
+
+  it.each(["STRIPE_PRICE_UNLOCK", "STRIPE_PRICE_LIVE"])(
+    "refuses to start without %s",
+    async (missing) => {
+      /* Checkout names a price rather than an amount, so a missing one is not
+         a degraded checkout — it is Stripe rejecting the session at the moment
+         a customer clicks Buy, which is the worst place to discover it. */
+      const run = await assertWith({ ...COMPLETE, [missing]: undefined });
+      expect(run).toThrow(new RegExp(missing));
+    },
+  );
+
+  it("refuses a test-mode price in production", async () => {
+    // A live deployment pointed at test prices takes no money and says nothing
+    // useful about why.
+    const run = await assertWith({ ...COMPLETE, STRIPE_PRICE_UNLOCK: "price_test_abc" });
+    expect(run).toThrow(/test-mode price/);
+  });
 });
 
 describe("derived values", () => {

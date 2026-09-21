@@ -291,6 +291,22 @@ export class SiteStack extends Stack {
            assembled in the entrypoint, and the same value has to hold for a
            connection string this stack never sees. */
         PGSSLMODE: "no-verify",
+
+        /* The Stripe prices checkout charges against.
+
+           Environment and not secrets: a price id identifies a catalogue entry
+           and authorises nothing — it is visible to anyone who opens a checkout
+           session. Putting it in Secrets Manager would imply it needs
+           protecting and would put it behind the rotation story for values that
+           do.
+
+           They are mode-specific, which is the reason they are configuration at
+           all rather than constants: the test-mode ids do not resolve in live,
+           so a hardcoded pair works in exactly one mode. `assertProductionEnv()`
+           refuses to boot without them, because a missing price is Stripe
+           rejecting the session at the moment a customer clicks Buy. */
+        STRIPE_PRICE_UNLOCK: "price_1UI4trCh541LMojtKfufpOno",
+        STRIPE_PRICE_LIVE: "price_1UI4tsCh541LMojtsr3JcQN4",
       },
       secrets: {
         /* The credentials, and only the credentials.
