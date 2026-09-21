@@ -129,11 +129,30 @@ the next create, neither with an error that mentions the rollback:
 | Resource | Why it survives | What you see next time |
 |---|---|---|
 | ECR repository `venturelly` | `removalPolicy: RETAIN`, fixed name | `… with identifier 'venturelly' already exists` |
-| Secret `getventurely.com/app` | CloudFormation deletes a secret with a 30-day recovery window, and the name is fixed | `… a secret with this name is already scheduled for deletion` |
+| Secret `getventurely.com/app` | CloudFormation deletes a secret with a recovery window of up to 30 days, and the name is fixed | `… a secret with this name is already scheduled for deletion` |
 
-The script detects all three and offers to clear them, one confirmation
-each. By hand, in this order — the stack first, because deleting it is what
-strands the other two:
+Or, more often than either of those, as a change set that will not even build:
+
+```
+Failed to create ChangeSet cdk-deploy-change-set on VenturellySite: FAILED,
+The following hook(s)/validation failed: [AWS::EarlyValidation::ResourceExistenceCheck]
+```
+
+which names neither resource and advises `DescribeEvents` on a stack that may not
+exist. It means one of those two names is taken.
+
+**These outlive a stack delete however it happened**, including one typed by
+hand — which is what you do after a `ROLLBACK_FAILED`. So the script checks for
+them before *every* create, not only after a rollback it performed, and offers to
+clear each with one confirmation. A live stack is the one case it leaves alone:
+it owns both, and deleting either would break a running service.
+
+A change set that fails also parks an **empty** stack in `REVIEW_IN_PROGRESS`.
+Nothing is running and it never leaves that state on its own, so delete it like
+any other failed create.
+
+By hand, in this order — the stack first, because deleting it is what strands the
+other two:
 
 ```bash
 aws cloudformation delete-stack --stack-name VenturellySite --region us-east-1

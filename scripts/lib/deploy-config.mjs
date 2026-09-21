@@ -185,9 +185,11 @@ export function answersFromDisk(raw) {
  *
  * - `create` — no stack, or it was rolled back so far there is nothing left.
  * - `update` — a healthy stack; deploy on top of it.
- * - `recreate` — **the state the first deploy left behind.** A stack in
+ * - `recreate` — **the state a failed create leaves behind.** A stack in
  *   `ROLLBACK_COMPLETE` cannot be updated at all; it has to be deleted first,
  *   and deleting it is what exposes the two resources that survive the delete.
+ *   `REVIEW_IN_PROGRESS` belongs here too: it is an empty stack left by a change
+ *   set that failed to create, and it never leaves that state on its own.
  * - `wait` — something is in flight. Two `cdk deploy`s racing each other is how
  *   a stack reaches one of the `_FAILED` states below.
  * - `manual` — a failed delete or a failed rollback. These need
@@ -196,6 +198,11 @@ export function answersFromDisk(raw) {
  */
 export function stackAction(status) {
   if (!status) return "create";
+  /* The one `_IN_PROGRESS` that is not in progress. A change set that fails to
+     create on a new stack leaves an empty stack parked here indefinitely —
+     nothing is running and nothing will change it — so waiting on it is waiting
+     forever. It has to be deleted like any other failed create. */
+  if (status === "REVIEW_IN_PROGRESS") return "recreate";
   if (status.endsWith("_IN_PROGRESS")) return "wait";
   switch (status) {
     case "CREATE_COMPLETE":

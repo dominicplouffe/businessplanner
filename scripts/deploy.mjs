@@ -64,6 +64,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const INFRA = join(ROOT, "infra");
 const ANSWER_FILE = join(ROOT, ".deploy.json");
 
+/** Must match `BOOTSTRAP_TAG` in `infra/lib/site-stack.ts`, which branches on it
+ *  to create the service with no tasks. `tests/deploy.test.ts` checks the pair. */
+const BOOTSTRAP_TAG = "bootstrap";
+
 const SITE_STACK = "VenturellySite";
 const CERT_STACK = "VenturellyCertificate";
 const ECR_REPOSITORY = "venturelly";
@@ -639,8 +643,29 @@ async function recoverFailedStack(answers) {
   if (stackAction(status) === "wait") status = await waitForStackToSettle(SITE_STACK, status);
 
   const action = stackAction(status);
-  if (action === "create" || action === "update") {
+
+  /* A live stack owns the repository and the secret. Offering to delete either
+     would be offering to break a running service, so this path touches nothing. */
+  if (action === "update") {
+    skip(`${SITE_STACK} is ${status}`);
+    return;
+  }
+
+  if (action === "create") {
     skip(status ? `${SITE_STACK} is ${status}` : `${SITE_STACK} does not exist yet`);
+    /* And then check anyway.
+
+       These two used to run only on the `recreate` path — the one where this
+       script deletes the stack itself. That premise was wrong: the names outlive
+       a stack delete *however it happened*, including a `delete-stack` typed by
+       hand, which is exactly what somebody does after this script hands back a
+       ROLLBACK_FAILED. The result was a create that died on
+
+           [AWS::EarlyValidation::ResourceExistenceCheck]
+
+       with the two functions written for that condition sitting unreached. */
+    await clearRetainedRepository();
+    await clearSecretPendingDeletion(answers);
     return;
   }
   if (action === "wait") {
@@ -714,10 +739,11 @@ async function clearRetainedRepository() {
   const images = aws(["ecr", "list-images", "--repository-name", ECR_REPOSITORY], { mutates: false });
   const count = images?.imageIds?.length ?? 0;
   warn(
-    `The ECR repository ${bold(ECR_REPOSITORY)} survived the rollback (removalPolicy: RETAIN) ` +
-      `and holds ${count} image${count === 1 ? "" : "s"}.`,
+    `The ECR repository ${bold(ECR_REPOSITORY)} is left over from an earlier stack ` +
+      `(removalPolicy: RETAIN) and holds ${count} image${count === 1 ? "" : "s"}.`,
   );
-  note("Re-creating the stack fails with \"already exists\" unless it goes.");
+  note("Its name is fixed, so creating the stack fails on the name unless it goes —");
+  note("as [AWS::EarlyValidation::ResourceExistenceCheck], which names no resource.");
   if (count > 0) {
     note("Deleting it deletes those images. They can be rebuilt and pushed; nothing else uses them.");
   }
@@ -747,7 +773,8 @@ async function clearSecretPendingDeletion(answers) {
   }
 
   warn(`The secret ${bold(name)} is scheduled for deletion, which keeps the name reserved.`);
-  note('Re-creating the stack fails with "already scheduled for deletion" until it is gone.');
+  note("A recovery window of up to thirty days holds the name, so creating the stack fails");
+  note("until it is released — and the failure names no resource either.");
   if (!(await confirm("Restore and hard-delete it so the name is free?", true))) {
     stop("The next create will fail on the secret name.");
   }
@@ -773,8 +800,27 @@ async function createInfrastructure(answers) {
   note("First run takes about 25 minutes — most of it RDS and CloudFront.");
   note("The service is created wanting zero tasks, because the image it would run does");
   note("not exist yet: this stack creates the repository. Step 6 pushes one and raises it.");
-  cdk(["deploy", CERT_STACK, SITE_STACK, ...cdkContext(answers),
-    "--context", "imageTag=bootstrap", "--require-approval", "never"]);
+
+  /* `allowFail` so the one failure worth explaining can be explained. CDK reports
+     it as `[AWS::EarlyValidation::ResourceExistenceCheck]`, which names no
+     resource, and advises DescribeEvents on a stack that may not exist. */
+  const deployed = cdk(
+    ["deploy", CERT_STACK, SITE_STACK, ...cdkContext(answers),
+      "--context", `imageTag=${BOOTSTRAP_TAG}`, "--require-approval", "never"],
+    { allowFail: true },
+  );
+  if (deployed.status !== 0 && !deployed.dryRun) {
+    out();
+    out(red("✗ The stacks did not deploy."));
+    note("Something whose name is fixed already exists. This stack names exactly two:");
+    note(`  the ECR repository ${bold(ECR_REPOSITORY)}`);
+    note(`  the secret ${bold(`${answers.domainName}/app`)}`);
+    note("Both outlive a stack delete. Run this again — step 3 offers to clear them, and a");
+    note("failed change set also parks an empty stack in REVIEW_IN_PROGRESS that has to go.");
+    out();
+    closeInput();
+    process.exit(1);
+  }
   ok("stacks deployed");
 }
 

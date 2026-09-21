@@ -359,14 +359,29 @@ meant deleting by hand a database that had never finished being created. So
 brings the service up, and by then there is something to protect. Both changes
 are metadata or an in-place modify; neither replaces the instance.
 
-**A rollback is not a clean slate.** Two resources survive one and then collide
-on the next create with errors that do not mention the rollback: the ECR
-repository carries `removalPolicy: RETAIN` with a fixed name, and CloudFormation
-deletes a Secrets Manager secret with a thirty-day recovery window that keeps the
-name reserved. The stack has to be deleted first, then both cleared. The script
-does all three with a confirmation each; a `DELETE_FAILED` or `ROLLBACK_FAILED`
-it refuses, because that needs `--retain-resources` and a decision about what to
-keep.
+**A deleted stack is not a clean slate, however it was deleted.** Two resources
+outlive one and then collide on the next create: the ECR repository carries
+`removalPolicy: RETAIN` with a fixed name, and CloudFormation deletes a Secrets
+Manager secret with a recovery window of up to thirty days that keeps the name
+reserved. CloudFormation reports the collision as
+`[AWS::EarlyValidation::ResourceExistenceCheck]`, which names neither resource
+and advises `DescribeEvents` on a stack that may not exist.
+
+So the script checks for both **whenever the stack is about to be created**, not
+only when it did the deleting itself. That distinction cost a deploy: the stack
+had been deleted by hand — correctly, after a `ROLLBACK_FAILED` the script hands
+back — so step 3 said "does not exist yet" and skipped the two functions written
+for exactly this. A stack in `update` is the one case that must be left alone: it
+owns both, and offering to delete either is offering to break a running service.
+
+`REVIEW_IN_PROGRESS` is the one `_IN_PROGRESS` status that is not in progress. A
+change set that fails to create on a new stack parks an empty stack there
+indefinitely, so `stackAction` puts it in `recreate` rather than waiting forever
+for it to settle.
+
+A `DELETE_FAILED` or `ROLLBACK_FAILED` the script still refuses, because that
+needs `--retain-resources` and a decision about what to keep — but it prints the
+likely cause and the exact commands.
 
 **The deploy script writes answers down and never secrets.** `.deploy.json`
 (gitignored) carries region, account, domain and zone so a re-run does not

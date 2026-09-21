@@ -194,6 +194,13 @@ describe("deciding what to do with the stack that is already there", () => {
     }
   });
 
+  it("does not wait for the one _IN_PROGRESS that is not in progress", () => {
+    /* A change set that fails to create on a new stack parks an empty stack in
+       REVIEW_IN_PROGRESS forever. Treating it as in flight means waiting for
+       something that will never happen — forty minutes, then a timeout. */
+    expect(stackAction("REVIEW_IN_PROGRESS")).toBe("recreate");
+  });
+
   it("hands a failed delete or rollback to a human", () => {
     // These need `--retain-resources` and a decision about what to keep. A
     // script guessing at that can destroy a database.
@@ -314,6 +321,36 @@ describe("the preflight that would have caught the failure", () => {
   });
 });
 
+describe("the regression the fourth deploy was", () => {
+  /* `[AWS::EarlyValidation::ResourceExistenceCheck]` — CloudFormation refusing
+     to create resources whose names were already taken by the previous attempt.
+     The script knows both names and offers to clear them, but only did so on the
+     path where it deleted the stack itself. The stack had been deleted by hand,
+     correctly, after the script handed back a ROLLBACK_FAILED — so step 3 said
+     "does not exist yet" and skipped the two functions written for exactly this. */
+  const script = () => readFileSync("scripts/deploy.mjs", "utf8");
+
+  it("checks for leftovers on the path where the stack is about to be created", () => {
+    const create = script().slice(script().indexOf('if (action === "create")'));
+    const body = create.slice(0, create.indexOf("\n  }"));
+    expect(body).toContain("clearRetainedRepository()");
+    expect(body).toContain("clearSecretPendingDeletion(answers)");
+  });
+
+  it("leaves a live stack's repository and secret alone", () => {
+    // A healthy stack owns both. Offering to delete either is offering to break
+    // a running service, so that path returns before any of it.
+    const update = script().slice(script().indexOf('if (action === "update")'));
+    const body = update.slice(0, update.indexOf("\n  }"));
+    expect(body).toContain("return;");
+    expect(body).not.toContain("clearRetainedRepository");
+  });
+
+  it("explains the validation failure that names no resource", () => {
+    expect(script()).toContain("AWS::EarlyValidation::ResourceExistenceCheck");
+  });
+});
+
 describe("the regression the second deploy was", () => {
   /* `CREATE_FAILED | AWS::ECS::Service | "ECS Deployment Circuit Breaker was
      triggered"`, then a full rollback of twenty-five minutes of RDS and
@@ -370,7 +407,9 @@ describe("the regression the second deploy was", () => {
   it("is the tag the deploy script actually passes on the first deploy", () => {
     // A stack that bootstraps on "bootstrap" and a script that passes
     // "bootstrapping" would both look right and fail together.
-    expect(readFileSync("scripts/deploy.mjs", "utf8")).toContain('"imageTag=bootstrap"');
+    expect(readFileSync("scripts/deploy.mjs", "utf8")).toMatch(
+      /const BOOTSTRAP_TAG = "bootstrap"/,
+    );
   });
 });
 
