@@ -278,9 +278,8 @@ hundred small edits and the survivors hide in copy nobody re-reads. So
 `tests/site.test.ts` fails on any of them now. If that test fires, the spelling
 is the bug, not the test.
 
-The one exemption is the ECR repository name in `.github/workflows/deploy.yml`,
-which an agent session cannot edit — see the workflow note at the end of this
-section. DEPLOY.md carries the command that fixes it.
+The one exemption is the ECR repository name in the two workflow files, which an
+agent session cannot edit — see the note at the end of this section.
 
 `DATABASE_URL` alone decides the driver adapter, so there is no second flag to
 get out of step: a `postgres://` URL selects `@prisma/adapter-pg`, anything else
@@ -419,7 +418,15 @@ including a container build, because the image is the artefact that ships — a
 broken Dockerfile should fail on a branch rather than during a deploy.
 `deploy.yml` runs on push to `main` and stops on its first step, naming the
 missing `AWS_DEPLOY_ROLE_ARN`, until the GitHub deploy role step of DEPLOY.md
-has been done.
+has been done. After that a push to `main` *is* the deploy: verify, build, push,
+`cdk deploy`, wait for the service, invalidate, check `/api/health`.
+`node scripts/deploy.mjs --from=6` is the same thing by hand.
+
+**A migration is the only irreversible part of an update.** The service rolls
+forward with no downtime and the circuit breaker reverts a bad image by itself,
+but redeploying an earlier tag does not undo `prisma migrate deploy` — it already
+ran in the entrypoint before the port was bound. Nothing reviews a migration
+before it applies.
 
 **You cannot edit either file from an agent session.** GitHub refuses a push that
 writes under `.github/workflows/` unless the credential carries the `workflow`

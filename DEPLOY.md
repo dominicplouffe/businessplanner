@@ -455,32 +455,49 @@ CDK bootstrap roles (`cdk-*-deploy-role-*`, `cdk-*-file-publishing-role-*`).
 Then add the role ARN as the `AWS_DEPLOY_ROLE_ARN` repository secret, and create
 a `production` environment in GitHub if you want a manual approval gate.
 
-### The workflows — one rename still owed
+### Updating the app after this
 
-Both live in `.github/workflows/` and run as committed, but `deploy.yml` still
-spells the ECR repository and the two stack names the pre-rename way. The CDK app
-now creates them as `venturelly` / `VenturellySite` / `VenturellyCertificate`, so
-a deploy would push to a repository that does not exist and then create a second
-pair of stacks. An agent session cannot fix it — GitHub refuses a push that writes
-under `.github/workflows/` without the `workflow` scope — so it needs one command
-from a clone:
+Once `AWS_DEPLOY_ROLE_ARN` exists, **a push to `main` is the deploy**, and
+`node scripts/deploy.mjs --from=6` is the manual equivalent for when it does not.
+Both build an image, push it, and point the service at the new tag.
 
-<!-- spelling-exempt: the command below has to name the old spelling to replace it -->
+What happens while that runs:
+
+- **No downtime.** `minHealthyPercent: 100` and `maxHealthyPercent: 200` mean new
+  tasks reach healthy before any old one is drained.
+- **Migrations ship inside the image.** The entrypoint runs `prisma migrate
+  deploy` before binding a port, so a failed migration leaves the task unhealthy
+  rather than serving traffic against a schema it does not match.
+- **A bad image reverts itself.** The deployment circuit breaker rolls back to
+  the previous task definition.
+- **Nothing HTML is cached at the edge.** The default CloudFront behaviour is
+  `CACHING_DISABLED`, deliberately, because this origin serves signed-in pages —
+  so a deploy is visible immediately and the invalidation is belt-and-braces.
+  Only `/_next/static/*` and `/fonts/*` are cached, and those are content-hashed.
+- **Changing a secret is not a deploy.** Secrets are read when a task starts:
+  `put-secret-value`, then `aws ecs update-service --force-new-deployment`.
+
+To roll back, redeploy an earlier tag — ECR keeps the last 20 images:
+
 ```bash
-# GNU sed; on macOS use: sed -i ''
-sed -i 's/ventur[a]lly/venturelly/g; s/Ventur[a]lly/Venturelly/g' .github/workflows/deploy.yml
-git commit -am "Rename the image and stacks in the deploy workflow" && git push
+cd infra && npx cdk deploy VenturellySite \
+  --context domainName=getventurely.com --context imageTag=<previous-sha>
 ```
 
-The character class is only there so this file passes its own spelling check;
-`ventur[a]lly` matches the same text the plain word would. `tests/site.test.ts`
-exempts the two workflow files from the brand check, and only from that one.
+**A migration is not rolled back by redeploying the old image.** That is the one
+genuinely irreversible part of an update, and nothing currently reviews a
+migration before `migrate deploy` applies it. Read the diff under
+`prisma/migrations/` before merging anything that adds one.
 
-They could not be put there from an agent session — GitHub refuses a push that
+### Changing the workflows
+
+Neither file can be edited from an agent session: GitHub refuses a push that
 writes under `.github/workflows/` unless the credential carries the `workflow`
-scope, and neither the git credential nor the REST API has it. If a future
-session needs to change one, that is why it will be refused, and the fix is to
-make the edit from a clone rather than to work around it.
+scope, and neither the git credential nor the REST API available there has it.
+Both routes fail late, after the commit looks fine locally. Edits have to be made
+from a clone. `tests/site.test.ts` exempts the two workflow files from the brand
+spelling check, and only from that one, because the ECR repository name appears
+in them.
 
 Once that secret exists, every push to `main` deploys: verify → build → push →
 `cdk deploy` → wait for the service → invalidate the edge → check
