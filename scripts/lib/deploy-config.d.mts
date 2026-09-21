@@ -34,6 +34,7 @@ export interface OrderableProblem {
   why: string;
   fix: string;
 }
+export declare function matchesEngineVersion(configured: string, offered: unknown): boolean;
 export declare function checkOrderable(
   config: RdsConfig,
   options: unknown,

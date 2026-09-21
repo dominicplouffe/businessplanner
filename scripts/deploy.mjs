@@ -53,6 +53,7 @@ import {
   buildSecretString,
   checkOrderable,
   generateAuthSecret,
+  matchesEngineVersion,
   isWebhookPlaceholder,
   readRdsConfig,
   stackAction,
@@ -281,13 +282,22 @@ function run(command, args, { mutates = true, capture = false, allowFail = false
 
 let REGION = "us-east-1";
 
+/* Why the last `aws` call returned null.
+   A read that fails is usually a question being answered "no", so `aws` returns
+   null rather than stopping — but a check that quietly does not run is worse
+   than one that fails, so the reason is kept for whoever wants to print it. */
+let lastAwsError = "";
+
 /** The AWS CLI, always with an explicit region and always parsed as JSON.
  *  Returns null when the call fails, so "does this exist?" reads naturally. */
 function aws(args, { mutates = true, allowFail = false } = {}) {
   const full = [...args, "--region", REGION, "--output", "json"];
   const result = run("aws", full, { mutates, capture: true, allowFail: allowFail || !mutates });
   if (result.dryRun) return { dryRun: true };
-  if (result.status !== 0) return null;
+  if (result.status !== 0) {
+    lastAwsError = (result.stderr ?? "").trim();
+    return null;
+  }
   const text = (result.stdout ?? "").trim();
   if (text === "") return {};
   try {
@@ -466,23 +476,41 @@ async function checkDatabaseIsOrderable(answers) {
     return;
   }
 
+  /* No `--engine-version` when the stack pins only a major one.
+
+     The version fix made `EngineVersion` render as `"17"`, which is exactly what
+     RDS wants for a create — but `describe-orderable-db-instance-options` will
+     not take a major version as a *filter*, so passing it turned this check into
+     a silent no-op on the first run that used it. Ask for every version offered
+     on the instance class instead, and let `checkOrderable` do the matching. */
+  const pinsMinor = config.engineVersion.includes(".");
   const offered = aws(
     [
       "rds", "describe-orderable-db-instance-options",
       "--engine", config.engine,
-      "--engine-version", config.engineVersion,
+      ...(pinsMinor ? ["--engine-version", config.engineVersion] : []),
       "--db-instance-class", config.instanceClass,
     ],
     { mutates: false },
   );
   if (offered === null || offered.dryRun) {
-    warn("Could not check the database configuration against RDS; the deploy will find out.");
+    warn("Could not check the database configuration against RDS, so the deploy will find out.");
+    if (lastAwsError) {
+      for (const line of lastAwsError.split("\n").slice(0, 3)) note(line);
+    }
+    note("Not fatal — but this is the check that catches a CREATE_FAILED ten minutes in.");
     return;
   }
 
-  const problems = checkOrderable(config, offered.OrderableDBInstanceOptions ?? []);
+  const all = offered.OrderableDBInstanceOptions ?? [];
+  const problems = checkOrderable(config, all);
   if (problems.length === 0) {
+    const minors = [...new Set(all
+      .filter((o) => matchesEngineVersion(config.engineVersion, o?.EngineVersion))
+      .map((o) => o.EngineVersion))].sort();
     ok(`${config.engine} ${config.engineVersion} on ${config.instanceClass} is available here`);
+    if (minors.length > 0) note(`RDS offers ${minors.join(", ")} — it will use its default`);
+    if (config.multiAz) note("Multi-AZ and Performance Insights both supported on that class");
     return;
   }
   out();

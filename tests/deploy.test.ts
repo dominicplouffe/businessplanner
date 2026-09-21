@@ -11,6 +11,7 @@ import {
   checkOrderable,
   generateAuthSecret,
   isWebhookPlaceholder,
+  matchesEngineVersion,
   readRdsConfig,
   stackAction,
   validateSecretValue,
@@ -244,10 +245,61 @@ describe("the preflight that would have caught the failure", () => {
     expect(problems[0]!.fix).toContain("site-stack.ts");
   });
 
+  it("matches the major version the stack pins against the minors AWS offers", () => {
+    /* The stack renders `EngineVersion: "17"` on purpose, and
+       describe-orderable-db-instance-options will not take that as a filter — so
+       the query asks for every version on the class and the matching happens
+       here. Getting this wrong turned the whole check into a silent no-op on the
+       first run that used it. */
+    expect(matchesEngineVersion("17", "17.4")).toBe(true);
+    expect(matchesEngineVersion("17", "17.10")).toBe(true);
+    expect(matchesEngineVersion("17", "16.8")).toBe(false);
+    // Not a prefix match on digits: 17 must not claim 170.x or 171.
+    expect(matchesEngineVersion("17", "170.1")).toBe(false);
+    expect(matchesEngineVersion("17", "17")).toBe(true);
+    // An exact pin matches only itself.
+    expect(matchesEngineVersion("17.4", "17.4")).toBe(true);
+    expect(matchesEngineVersion("17.4", "17.5")).toBe(false);
+    expect(matchesEngineVersion("17", undefined)).toBe(false);
+  });
+
+  it("ignores offerings for a different major version", () => {
+    const config = readRdsConfig(template)!;
+    // An unfiltered query returns every version on the class. A 16.x that
+    // supports everything must not vouch for a 17 that AWS no longer offers.
+    expect(
+      checkOrderable(config, [
+        { EngineVersion: "16.8", MultiAZCapable: true, SupportsPerformanceInsights: true },
+      ]),
+    ).toHaveLength(1);
+
+    expect(
+      checkOrderable(config, [
+        { EngineVersion: "16.8", MultiAZCapable: true, SupportsPerformanceInsights: true },
+        { EngineVersion: "17.4", MultiAZCapable: true, SupportsPerformanceInsights: true },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("keeps an offering that carries no version, for a caller that filtered already", () => {
+    const config = readRdsConfig(template)!;
+    expect(
+      checkOrderable(config, [{ MultiAZCapable: true, SupportsPerformanceInsights: true }]),
+    ).toEqual([]);
+  });
+
+  it("does not pass a major version to RDS as a filter", () => {
+    // The bug this whole group exists for: `--engine-version 17` is rejected,
+    // the call returns nothing, and the check silently does not run.
+    expect(readFileSync("scripts/deploy.mjs", "utf8")).toMatch(
+      /pinsMinor\s*\?\s*\["--engine-version", config\.engineVersion\]\s*:\s*\[\]/,
+    );
+  });
+
   it("names Multi-AZ and Performance Insights separately", () => {
     const config = readRdsConfig(template)!;
     const problems = checkOrderable(config, [
-      { MultiAZCapable: false, SupportsPerformanceInsights: false },
+      { EngineVersion: "17.4", MultiAZCapable: false, SupportsPerformanceInsights: false },
     ]);
     expect(problems.map((p) => p.what)).toEqual(["Multi-AZ", "Performance Insights"]);
   });
@@ -255,7 +307,9 @@ describe("the preflight that would have caught the failure", () => {
   it("passes a configuration AWS offers", () => {
     const config = readRdsConfig(template)!;
     expect(
-      checkOrderable(config, [{ MultiAZCapable: true, SupportsPerformanceInsights: true }]),
+      checkOrderable(config, [
+        { EngineVersion: "17.4", MultiAZCapable: true, SupportsPerformanceInsights: true },
+      ]),
     ).toEqual([]);
   });
 });

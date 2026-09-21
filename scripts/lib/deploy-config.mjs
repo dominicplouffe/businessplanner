@@ -254,8 +254,33 @@ export function readRdsConfig(template) {
  * smallest burstable classes are the other two that look identical from the
  * outside.
  */
-export function checkOrderable(config, options) {
+/**
+ * Whether an offering's version is the one the stack asks for.
+ *
+ * The stack pins a *major* version (`"17"`), deliberately — see `BOOTSTRAP_TAG`'s
+ * neighbour in `infra/lib/site-stack.ts`. RDS reads that as "the current default
+ * minor", but `describe-orderable-db-instance-options` will not take it as a
+ * filter, so the caller asks without a version and the match happens here: `17`
+ * matches `17.4`, and an exact pin matches only itself.
+ */
+export function matchesEngineVersion(configured, offered) {
+  if (typeof offered !== "string" || typeof configured !== "string") return false;
+  if (offered === configured) return true;
+  return !configured.includes(".") && offered.startsWith(`${configured}.`);
+}
+
+export function checkOrderable(config, rawOptions) {
   const problems = [];
+  /* Filter here rather than in the query. An unfiltered list is what the caller
+     can actually obtain, and matching a major version against the minors AWS
+     offers is the whole question being asked. Offerings that carry no version
+     are kept, so a caller that *did* filter server-side is not thrown away. */
+  const options = Array.isArray(rawOptions)
+    ? rawOptions.filter(
+        (o) => o?.EngineVersion === undefined || matchesEngineVersion(config.engineVersion, o.EngineVersion),
+      )
+    : rawOptions;
+
   if (!Array.isArray(options) || options.length === 0) {
     problems.push({
       what: `${config.engine} ${config.engineVersion} on ${config.instanceClass}`,
