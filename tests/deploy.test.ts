@@ -327,6 +327,33 @@ describe("the preflight that would have caught the failure", () => {
   });
 });
 
+describe("the way out", () => {
+  const script = () => readFileSync("scripts/deploy.mjs", "utf8");
+
+  it("does not let readline swallow Ctrl-C", () => {
+    /* A readline interface on a TTY intercepts Ctrl-C: with no SIGINT listener
+       it emits `pause` on the stream instead of letting the signal reach the
+       process. Harmless while an interface was created and closed around each
+       question; a five-minute wait nobody could escape once one interface was
+       kept open for the whole run. `process.on("SIGINT")` alone does not help,
+       because readline consumes it first — the listener has to be on the
+       interface. */
+    expect(script()).toMatch(/reader\.on\("SIGINT"/);
+    expect(script()).toMatch(/process\.on\("SIGINT", interrupted\)/);
+  });
+
+  it("says what the interrupt cost at every step", () => {
+    const notes = script().slice(script().indexOf("const INTERRUPT_NOTES"));
+    for (let step = 1; step <= 9; step += 1) {
+      expect(notes.slice(0, notes.indexOf("};")), `step ${step}`).toContain(`${step}:`);
+    }
+  });
+
+  it("points at the step to resume from", () => {
+    expect(script()).toContain("node scripts/deploy.mjs --from=");
+  });
+});
+
 describe("the regression the sixth deploy was", () => {
   /* Every task died before it started:
 

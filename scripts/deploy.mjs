@@ -130,10 +130,62 @@ const note = (s) => out(`    ${dim(s)}`);
 
 /* Numbered explicitly rather than counted, because `--from=` skips steps and a
    number that drifts is worse than no number — DEPLOY.md refers to these. */
+/* Which step is running, so an interrupt can say where it happened. */
+let currentStep = 1;
+
 function heading(n, title) {
+  currentStep = n;
   out();
   out(bold(`${n}. ${title}`));
 }
+
+/**
+ * The steps where Ctrl-C costs nothing, and what it costs where it does.
+ *
+ * Worth saying rather than leaving somebody to guess. Step 7 is the common one:
+ * it waits for the service and polls `/api/health`, observing only — the image
+ * was pushed and the stack deployed back in step 6, so interrupting changes
+ * nothing in AWS. The ones that are not safe say what is in flight instead.
+ */
+const INTERRUPT_NOTES = {
+  1: ["Nothing had started.", "Preflight only reads."],
+  2: ["`cdk bootstrap` may be part-way.", "Re-running is safe; it is idempotent."],
+  3: ["A delete may be in flight.", "Re-run and it will wait for the stack to settle."],
+  4: [
+    "CloudFormation carries on server-side — closing this does not stop it.",
+    "Re-run once the stack settles; step 3 handles whatever state it lands in.",
+  ],
+  5: ["The secret may or may not have been written.", "Re-run from step 5 to write all four keys again."],
+  6: ["A build or push may be part-way. Both are safe to repeat."],
+  7: [
+    "Nothing was lost: this step only watches.",
+    "The image is pushed and the stack is deployed.",
+  ],
+  8: ["The webhook secret was not stored.", "The service is still on the placeholder."],
+  9: ["The IAM role may be part-way; re-running finishes it."],
+};
+
+/* Ctrl-C should not leave somebody wondering what it broke. Registered on the
+   process for the stretches before any prompt exists, and on the readline
+   interface — see `input()` — for everywhere else. */
+function interrupted() {
+  out();
+  out();
+  out(yellow(`Interrupted during step ${currentStep}.`));
+  for (const line of INTERRUPT_NOTES[currentStep] ?? []) note(line);
+  const resume = currentStep >= 8 ? currentStep : Math.max(2, currentStep);
+  out();
+  out(`  Resume with:  ${bold(`node scripts/deploy.mjs --from=${resume}`)}`);
+  if (currentStep === 7) {
+    note("If the service is already healthy, go straight to step 8 — the Stripe webhook");
+    note("is the only thing that grants an entitlement, and it is still a placeholder.");
+  }
+  out();
+  closeInput();
+  process.exit(130);
+}
+
+process.on("SIGINT", interrupted);
 
 /** Stop, with the reason and what to do about it. Never a stack trace: every
  *  exit from this script is a condition somebody has to act on. */
@@ -173,6 +225,16 @@ function input() {
     inputClosed = true;
     for (const waiter of waiting.splice(0)) waiter(null);
   });
+  /* Without this, Ctrl-C does nothing for the whole run.
+
+     A readline interface on a TTY intercepts Ctrl-C: with no `SIGINT` listener
+     attached it emits `pause` on the stream rather than letting the signal reach
+     the process. That was harmless while an interface was created and closed
+     around each question; it became a five-minute wait nobody could escape once
+     one interface was kept open for the whole run — which is how the piped-input
+     fix broke the only way out. `process.on("SIGINT")` is not enough on its own,
+     because readline consumes it first. */
+  reader.on("SIGINT", () => interrupted());
   /* `_writeToOutput` is readline's own hook for suppressing the echo and has
      been stable for a decade, but it is not public API. A live Stripe key
      pasted onto a shared screen is what it is here for. */
@@ -1122,7 +1184,7 @@ async function waitForHealth(answers, outputs) {
     } catch (error) {
       if (attempt % 5 === 0) note(`attempt ${attempt}: ${error.message}`);
     }
-    await new Promise((r) => setTimeout(r, 15_000));
+    await sleep(15_000);
   }
   warn(`${url}/api/health has not answered yet.`);
   note("DNS and CloudFront both take a few minutes on a first deploy. Try the distribution");

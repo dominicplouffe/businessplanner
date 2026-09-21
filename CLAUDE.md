@@ -418,6 +418,16 @@ Relaxing that set without encoding in the entrypoint yields a connection string
 that parses and points somewhere else. `tests/deploy.test.ts` checks both — the
 keys read against the keys created, and the excluded set.
 
+**A readline interface swallows Ctrl-C.** On a TTY, with no `SIGINT` listener
+attached, it emits `pause` on the stream rather than letting the signal reach the
+process. That was harmless while `scripts/deploy.mjs` created and closed an
+interface around each question; keeping one open for the whole run — which is
+what made piped input work — left no way out of a five-minute wait.
+`process.on("SIGINT")` does not help on its own, because readline consumes the
+signal first: the listener has to be on the interface as well. The handler names
+the step, says what the interrupt cost there, and prints the `--from=` to resume
+with.
+
 **Check the daemon, not the client.** `docker --version` prints the client's own
 version and contacts nothing, so it succeeded on a machine where the socket was
 root-only — `✓ Docker version 29.7.2` printed immediately before `permission
