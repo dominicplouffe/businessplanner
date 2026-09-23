@@ -18,7 +18,8 @@
     "db:provider": "node scripts/set-db-provider.mjs",
     "postinstall": "prisma generate",
     "e2e": "node tests/e2e/smoke.mjs",
-    "deploy:aws": "node scripts/deploy.mjs"
+    "deploy:aws": "node scripts/deploy.mjs",
+    "destroy:aws": "node scripts/deploy.mjs --destroy"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
