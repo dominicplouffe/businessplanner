@@ -48,10 +48,12 @@ import {
   OPTIONAL_SECRET_KEYS,
   SECRET_KEYS,
   WEBHOOK_PLACEHOLDER,
+  answersAfterTeardown,
   answersFromDisk,
   answersToPersist,
   buildSecretString,
   checkOrderable,
+  finalSnapshotId,
   generateAuthSecret,
   matchesEngineVersion,
   isWebhookPlaceholder,
@@ -85,12 +87,17 @@ const FROM = Number(argv.find((a) => a.startsWith("--from="))?.slice(7) ?? 0);
    deploy` typed by hand with the four context flags remembered correctly. */
 const STACK_ONLY = argv.includes("--stack-only");
 
+/* Take everything billable down, for the stretch when the site is not in use.
+   `cdk destroy` cannot do it — see `destroy()` for why. */
+const DESTROY = argv.includes("--destroy");
+
 const USAGE = `Deploy Venturelly to AWS.
 
   node scripts/deploy.mjs                the whole thing, resumable
   node scripts/deploy.mjs --dry-run      every question and command, writing nothing
   node scripts/deploy.mjs --from=6       resume at a step (preflight always runs)
   node scripts/deploy.mjs --stack-only   redeploy the stack, no image rebuild
+  node scripts/deploy.mjs --destroy      tear it all down; asks you to type the domain first
   node scripts/deploy.mjs --help         this
 
 Steps:
@@ -112,10 +119,14 @@ if (argv.includes("--help") || argv.includes("-h")) {
 /* An unrecognised flag is a typo, and a typo that is ignored is a deploy that
    does something other than what was asked for. */
 const unknown = argv.filter(
-  (a) => a !== "--dry-run" && a !== "--stack-only" && !a.startsWith("--from="),
+  (a) => a !== "--dry-run" && a !== "--stack-only" && a !== "--destroy" && !a.startsWith("--from="),
 );
 if (unknown.length > 0) {
   process.stderr.write(`Unrecognised: ${unknown.join(" ")}\n\n${USAGE}`);
+  process.exit(2);
+}
+if (DESTROY && argv.some((a) => a === "--stack-only" || a.startsWith("--from="))) {
+  process.stderr.write("--destroy combines with --dry-run and nothing else.\n");
   process.exit(2);
 }
 if (argv.some((a) => a.startsWith("--from=")) && !Number.isInteger(FROM)) {
@@ -183,6 +194,15 @@ const INTERRUPT_NOTES = {
 function interrupted() {
   out();
   out();
+  if (DESTROY) {
+    out(yellow("Interrupted during the teardown."));
+    note("Any delete already started carries on server-side — closing this does not stop it.");
+    out();
+    out(`  Pick up where it stopped:  ${bold("node scripts/deploy.mjs --destroy")}`);
+    out();
+    closeInput();
+    process.exit(130);
+  }
   out(yellow(`Interrupted during step ${currentStep}.`));
   for (const line of INTERRUPT_NOTES[currentStep] ?? []) note(line);
   const resume = currentStep >= 8 ? currentStep : Math.max(2, currentStep);
@@ -1460,9 +1480,217 @@ function finish(answers, outputs) {
   out();
 }
 
+/* ==========================================================================
+   --destroy — take it all down
+   ========================================================================== */
+
+/**
+ * Everything billable, gone, so an unused site costs about a dollar a month.
+ *
+ * `cdk destroy` cannot do this, and the way it fails is expensive. The
+ * production database is RETAINed and deletion-protected, so CloudFormation
+ * skips it — the one resource worth ~$50 a month keeps running. And its network
+ * interfaces keep holding the data subnets and the database security group, so
+ * the stack lands in DELETE_FAILED (the same shape as the ROLLBACK_FAILED in the
+ * comment on `deletionProtection` in site-stack.ts). So the database goes first,
+ * by hand, with a final snapshot unless told otherwise, and then the stack.
+ *
+ * Afterwards it clears what outlives a stack delete: the repository and secret
+ * (fixed names, which would block the next create exactly as step 3 describes),
+ * the CloudFront log bucket and the log groups.
+ *
+ * Kept: the hosted zone (the domain needs it), the certificate stack (free, and
+ * keeping it skips DNS validation on the way back), the CDK bootstrap stack and
+ * the GitHub deploy role (both free).
+ *
+ * Idempotent like the rest of this script: every delete checks first, so a run
+ * that stops part-way is finished by running it again.
+ */
+async function destroy(answers) {
+  out();
+  out(bold("Tear down Venturelly on AWS"));
+  if (DRY) out(yellow("  --dry-run: reads are performed, nothing is deleted."));
+
+  heading(1, "Where");
+  const cli = run("aws", ["--version"], { mutates: false, capture: true, allowFail: true });
+  if (cli.status !== 0) stop("The AWS CLI is not installed.");
+  REGION = await ask("AWS region", { fallback: answers.region ?? "us-east-1" });
+  const identity = aws(["sts", "get-caller-identity"], { mutates: false });
+  if (!identity?.Account) {
+    stop("`aws sts get-caller-identity` did not return an account.", lastAwsError);
+  }
+  ok(`Account ${bold(identity.Account)} as ${dim(identity.Arn)}`);
+  const domain = await ask("Domain", { fallback: answers.domainName ?? "getventurely.com" });
+  const secretName = `${domain}/app`;
+
+  heading(2, "What is there");
+
+  let status = stackStatus(SITE_STACK);
+  if (status && stackAction(status) === "wait") status = await waitForStackToSettle(SITE_STACK, status);
+
+  const resources = status
+    ? (aws(["cloudformation", "list-stack-resources", "--stack-name", SITE_STACK], { mutates: false })
+        ?.StackResourceSummaries ?? []).filter((r) => r.ResourceStatus !== "DELETE_COMPLETE")
+    : [];
+  const physical = (type) =>
+    resources.filter((r) => r.ResourceType === type && r.PhysicalResourceId).map((r) => r.PhysicalResourceId);
+
+  const dbId = physical("AWS::RDS::DBInstance")[0];
+  const db = dbId
+    ? aws(["rds", "describe-db-instances", "--db-instance-identifier", dbId], { mutates: false })
+        ?.DBInstances?.[0]
+    : undefined;
+  const subnetGroups = physical("AWS::RDS::DBSubnetGroup");
+  const buckets = physical("AWS::S3::Bucket");
+  const repository = aws(["ecr", "describe-repositories", "--repository-names", ECR_REPOSITORY],
+    { mutates: false })?.repositories?.[0];
+  const secret = aws(["secretsmanager", "describe-secret", "--secret-id", secretName], { mutates: false });
+  const certStatus = stackStatus(CERT_STACK);
+
+  if (!status && !db && !repository && !secret?.Name) {
+    ok("nothing billable is left — the site is already down");
+    closeInput();
+    return;
+  }
+
+  out("  Will be deleted:");
+  if (db) note(`· database ${db.DBInstanceIdentifier} (${db.DBInstanceClass}, ${db.DBInstanceStatus})`);
+  if (status) {
+    note(`· ${SITE_STACK} (${status}): VPC and NAT gateway, load balancer, ECS service,`);
+    note(`  CloudFront, and the DNS records for ${domain}`);
+  }
+  if (repository) note(`· ECR repository ${ECR_REPOSITORY} and its images — rebuilt from git on the way back`);
+  if (secret?.Name) note(`· secret ${secretName} — the Stripe and Anthropic keys are re-entered on the way back`);
+  if (buckets.length) note(`· CloudFront log bucket${buckets.length > 1 ? "s" : ""} ${buckets.join(", ")}`);
+  note("· the stack's CloudWatch log groups");
+  out("  Kept:");
+  note(`· the Route 53 hosted zone for ${domain} (~$0.50/month; the domain needs it)`);
+  if (certStatus) note(`· ${CERT_STACK} — ACM certificates are free, and keeping it skips re-validation`);
+  note("· the CDK bootstrap stack and the GitHub deploy role, both free");
+
+  heading(3, "Confirm");
+  let snapshotId;
+  if (db) {
+    note("A snapshot costs cents a month and is the only copy of every account and plan.");
+    if (await confirm("Keep a final snapshot of the database?", true)) {
+      snapshotId = finalSnapshotId();
+      note(`snapshot: ${snapshotId}`);
+    } else {
+      warn("No snapshot: the database's contents are gone for good.");
+    }
+  }
+  if (DRY) {
+    skip(`would ask you to type ${domain} before deleting anything`);
+  } else {
+    const typed = await prompt(`  ${red("This cannot be undone.")} Type ${bold(domain)} to confirm: `);
+    if (typed !== domain) stop("That did not match. Nothing was deleted.");
+  }
+
+  heading(4, "Delete the database");
+  if (!db) {
+    skip("no database");
+  } else if (db.DBInstanceStatus !== "deleting") {
+    if (db.DeletionProtection) {
+      if (!aws(["rds", "modify-db-instance", "--db-instance-identifier", dbId,
+        "--no-deletion-protection", "--apply-immediately"])) {
+        stop(`Could not turn off deletion protection on ${dbId}.`, lastAwsError);
+      }
+      ok("deletion protection off");
+    }
+    const deleted = aws(["rds", "delete-db-instance", "--db-instance-identifier", dbId,
+      ...(snapshotId ? ["--final-db-snapshot-identifier", snapshotId] : ["--skip-final-snapshot"]),
+      "--delete-automated-backups"]);
+    if (!deleted) stop(`Could not delete ${dbId}.`, lastAwsError);
+  }
+  if (db) {
+    note("waiting for RDS to finish — usually five to fifteen minutes…");
+    run("aws", ["rds", "wait", "db-instance-deleted", "--db-instance-identifier", dbId,
+      "--region", REGION]);
+    ok(snapshotId ? `database deleted, snapshot ${snapshotId} kept` : "database deleted");
+    // Retained along with the instance. Harmless, but it is litter.
+    for (const group of subnetGroups) {
+      aws(["rds", "delete-db-subnet-group", "--db-subnet-group-name", group], { allowFail: true });
+    }
+  }
+
+  heading(5, `Delete ${SITE_STACK}`);
+  if (!status) {
+    skip(`${SITE_STACK} does not exist`);
+  } else {
+    note("ten to twenty minutes; CloudFront is the slow part");
+    aws(["cloudformation", "delete-stack", "--stack-name", SITE_STACK]);
+    const waited = run("aws", ["cloudformation", "wait", "stack-delete-complete",
+      "--stack-name", SITE_STACK, "--region", REGION], { allowFail: true });
+    if (waited.status !== 0) {
+      const events = aws(["cloudformation", "describe-stack-events", "--stack-name", SITE_STACK],
+        { mutates: false });
+      out();
+      out(red(`✗ ${SITE_STACK} did not delete cleanly. What would not go:`));
+      for (const e of (events?.StackEvents ?? []).filter((e) => e.ResourceStatus === "DELETE_FAILED")) {
+        note(`${e.LogicalResourceId}: ${e.ResourceStatusReason ?? ""}`);
+      }
+      out();
+      out(`  Fix that, then run ${bold("node scripts/deploy.mjs --destroy")} again — it picks up here.`);
+      closeInput();
+      process.exit(1);
+    }
+    ok(`${SITE_STACK} deleted`);
+  }
+
+  heading(6, "Clear what outlives the stack");
+  if (repository) {
+    aws(["ecr", "delete-repository", "--repository-name", ECR_REPOSITORY, "--force"]);
+    ok(`repository ${ECR_REPOSITORY} deleted`);
+  }
+  /* Read again rather than trusting the earlier answer: CloudFormation may have
+     removed it outright, or left it in a recovery window that holds the name. */
+  const leftover = aws(["secretsmanager", "describe-secret", "--secret-id", secretName], { mutates: false });
+  if (leftover?.Name) {
+    if (leftover?.DeletedDate) aws(["secretsmanager", "restore-secret", "--secret-id", secretName]);
+    aws(["secretsmanager", "delete-secret", "--secret-id", secretName, "--force-delete-without-recovery"]);
+    ok(`secret ${secretName} deleted, name freed for the next deploy`);
+  }
+  for (const bucket of buckets) {
+    if (run("aws", ["s3api", "head-bucket", "--bucket", bucket], { mutates: false, capture: true,
+      allowFail: true }).status === 0) {
+      run("aws", ["s3", "rb", `s3://${bucket}`, "--force", "--region", REGION], { capture: true });
+      ok(`bucket ${bucket} deleted`);
+    }
+  }
+  const groups = aws(["logs", "describe-log-groups", "--log-group-name-pattern", SITE_STACK],
+    { mutates: false })?.logGroups ?? [];
+  for (const group of groups) {
+    aws(["logs", "delete-log-group", "--log-group-name", group.logGroupName], { allowFail: true });
+  }
+  if (groups.length) ok(`${groups.length} log group${groups.length > 1 ? "s" : ""} deleted`);
+
+  saveAnswers(answersAfterTeardown({ ...answers, region: REGION, domainName: domain }));
+
+  out();
+  out(bold(DRY ? "Dry run done — nothing was deleted." : `Done. Nothing billable is left running for ${domain}.`));
+  if (snapshotId) {
+    note(`The snapshot is kept until you delete it:`);
+    note(`  aws rds delete-db-snapshot --region ${REGION} --db-snapshot-identifier ${snapshotId}`);
+  }
+  if (certStatus) {
+    note(`To remove the certificate as well:`);
+    note(`  aws cloudformation delete-stack --region us-east-1 --stack-name ${CERT_STACK}`);
+  }
+  out();
+  out("  Coming back:");
+  note("· `node scripts/deploy.mjs` rebuilds everything. It asks for the Stripe and Anthropic");
+  note("  keys again, and the database starts empty — restoring the snapshot is not automated.");
+  note(`· The Stripe webhook endpoint still points at ${domain}. Disable it in the dashboard`);
+  note("  while the site is down; on the way back, step 8 asks for its signing secret again.");
+  out();
+  closeInput();
+}
+
 /* ========================================================================== */
 
 async function main() {
+  if (DESTROY) return destroy(loadAnswers());
+
   out();
   out(bold("Deploy Venturelly to AWS"));
   if (DRY) out(yellow("  --dry-run: reads are performed, nothing is written."));

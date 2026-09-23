@@ -5,10 +5,12 @@ import {
   PERSISTED_KEYS,
   SECRET_KEYS,
   WEBHOOK_PLACEHOLDER,
+  answersAfterTeardown,
   answersFromDisk,
   answersToPersist,
   buildSecretString,
   checkOrderable,
+  finalSnapshotId,
   generateAuthSecret,
   isWebhookPlaceholder,
   matchesEngineVersion,
@@ -376,6 +378,54 @@ describe("the way out", () => {
 
   it("points at the step to resume from", () => {
     expect(script()).toContain("node scripts/deploy.mjs --from=");
+  });
+});
+
+describe("taking it down", () => {
+  const script = () => readFileSync("scripts/deploy.mjs", "utf8");
+  const teardown = () => script().slice(script().indexOf("async function destroy("));
+
+  it("deletes the database before the stack, or the stack cannot delete", () => {
+    /* The production database is RETAINed, so CloudFormation skips it and its
+       network interfaces hold the data subnets — the stack ends DELETE_FAILED
+       and the most expensive resource keeps billing. */
+    const body = teardown();
+    expect(body.indexOf('"rds", "delete-db-instance"')).toBeGreaterThan(-1);
+    expect(body.indexOf('"rds", "delete-db-instance"')).toBeLessThan(
+      body.indexOf('"cloudformation", "delete-stack"'),
+    );
+  });
+
+  it("deletes nothing until the domain has been typed back", () => {
+    const body = teardown();
+    const confirmAt = body.indexOf("if (typed !== domain)");
+    expect(confirmAt).toBeGreaterThan(-1);
+    for (const call of ['"modify-db-instance"', '"delete-db-instance"', '"delete-stack"',
+      '"delete-repository"', '"delete-secret"']) {
+      expect(body.indexOf(call), call).toBeGreaterThan(confirmAt);
+    }
+  });
+
+  it("frees both fixed names, so coming back does not collide", () => {
+    expect(teardown()).toContain('"ecr", "delete-repository"');
+    expect(teardown()).toContain('"--force-delete-without-recovery"');
+  });
+
+  it("forgets the running deploy and remembers where it was", () => {
+    const after = answersAfterTeardown({
+      region: "us-east-1",
+      domainName: "getventurely.com",
+      lastImageTag: "abc123",
+      webhookConfigured: true,
+      STRIPE_SECRET_KEY: "sk_test_x",
+    });
+    expect(after).toEqual({ region: "us-east-1", domainName: "getventurely.com" });
+  });
+
+  it("names the final snapshot the way RDS accepts", () => {
+    const id = finalSnapshotId(new Date("2026-09-22T18:04:05.123Z"));
+    expect(id).toBe("venturelly-final-20260922-180405");
+    expect(id).toMatch(/^[a-z](?!.*--)[a-z0-9-]{0,254}[a-z0-9]$/);
   });
 });
 

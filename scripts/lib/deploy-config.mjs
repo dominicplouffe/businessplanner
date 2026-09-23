@@ -178,6 +178,33 @@ export function answersFromDisk(raw) {
   return answersToPersist(raw);
 }
 
+/**
+ * What `.deploy.json` should say once the stack is gone.
+ *
+ * Where it was deployed stays, so coming back does not re-ask. What described
+ * the running deploy goes: a `lastImageTag` naming an image in a repository that
+ * no longer exists is a `--stack-only` pointed at nothing, and a
+ * `webhookConfigured` that outlived the secret it was about is simply false.
+ */
+export function answersAfterTeardown(answers) {
+  const kept = answersToPersist(answers);
+  delete kept.lastImageTag;
+  delete kept.webhookConfigured;
+  return kept;
+}
+
+/**
+ * The name of the snapshot taken as the database is deleted.
+ *
+ * RDS wants letters, digits and single hyphens, starting with a letter and at
+ * most 255 characters — and a name that is already taken fails the delete, so
+ * it carries the time to the second rather than just the day.
+ */
+export function finalSnapshotId(now = new Date()) {
+  const stamp = now.toISOString().replace(/\.\d+Z$/, "").replace(/[-:]/g, "").replace("T", "-");
+  return `venturelly-final-${stamp}`;
+}
+
 /* ---- CloudFormation states -------------------------------------------- */
 
 /**

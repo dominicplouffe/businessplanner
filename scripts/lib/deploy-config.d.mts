@@ -15,6 +15,8 @@ export declare function validateSecretValue(key: string, value: unknown): string
 export declare function buildSecretString(values: Record<string, string>): string;
 export declare function answersToPersist(answers: Record<string, unknown>): Record<string, unknown>;
 export declare function answersFromDisk(raw: unknown): Record<string, unknown>;
+export declare function answersAfterTeardown(answers: Record<string, unknown>): Record<string, unknown>;
+export declare function finalSnapshotId(now?: Date): string;
 
 export type StackAction = "create" | "update" | "recreate" | "wait" | "manual";
 export declare function stackAction(status: string | undefined | null): StackAction;

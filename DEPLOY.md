@@ -94,6 +94,7 @@ real run of it failed ten minutes in.
 ```
 node scripts/deploy.mjs --dry-run    # every question and every command, writing nothing
 node scripts/deploy.mjs --from=6     # resume at a step
+node scripts/deploy.mjs --destroy    # take it all down — see "Taking it down"
 node scripts/deploy.mjs --help
 ```
 
@@ -563,6 +564,36 @@ Then walk one purchase end to end with a Stripe test card (`4242 4242 4242
 4242`): sign up, finish an intake, try to export (should refuse with 402), pay,
 export. `pnpm e2e` does exactly this against a local server and is the script to
 copy from.
+
+---
+
+## Taking it down
+
+If the site isn't in use, don't pay $90–130 a month to keep it running idle:
+
+```bash
+node scripts/deploy.mjs --destroy --dry-run   # what would go, deleting nothing
+node scripts/deploy.mjs --destroy             # asks you to type the domain first
+```
+
+`cdk destroy` doesn't work for this. The production database is retained and
+deletion-protected, so CloudFormation skips it and it keeps billing. Its
+network interfaces also keep holding the data subnets, so the stack ends in
+`DELETE_FAILED`. `--destroy` deletes the database first, and offers a final
+snapshot, which costs cents a month and is on by default. Then it deletes the
+stack. Last, it removes what outlives the stack: the ECR repository and the app
+secret, the CloudFront log bucket and the log groups. The repository and the
+secret have fixed names, so leaving either behind would make the next create
+fail. It keeps the hosted zone, the certificate stack, the CDK bootstrap stack
+and the GitHub deploy role, which are all free or close to it.
+
+Like the deploy, it can be re-run: if it stops partway, run it again.
+
+To come back, run `node scripts/deploy.mjs`. It remembers the region and domain.
+It asks for the Stripe and Anthropic keys again, and the database starts empty,
+because restoring the snapshot isn't automated. The Stripe webhook endpoint
+survives the teardown. Disable it in the dashboard while the site is down, then
+give its signing secret to step 8 on the way back.
 
 ---
 
