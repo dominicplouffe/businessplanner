@@ -21,6 +21,43 @@ describe("computeMetrics — break-even", () => {
     expect(k.breakEven.monthlyRevenueRequired).toBeCloseTo(expected, 6);
   });
 
+  /* This used to be `Infinity`, and `Infinity > 0` is `true` — so the rubric
+     check named "Break-even is computed, not asserted" passed on exactly the
+     plans where break-even does not exist. It also reached the facts block,
+     the only figures a generator is allowed to use, where it would render as
+     a price. */
+  it("reports no break-even when every sale loses money", () => {
+    const k = computeMetrics(
+      buildModel({
+        company: { name: "Below cost", startDate: "2026-01-01", horizonMonths: 36, industryKey: "other" },
+        revenueStreams: [
+          { id: "u", name: "Units", kind: "unit-sales", unitsMonth1: 100, monthlyGrowthRate: 0,
+            pricePerUnit: 10, costPerUnit: 14 },
+        ],
+        opex: [{ id: "r", name: "Rent", category: "rent", monthlyAmount: 5_000 }],
+      }),
+    );
+    expect(k.breakEven.contributionMarginRatio).toBeLessThan(0);
+    expect(k.breakEven.monthlyRevenueRequired).toBeNull();
+  });
+
+  it("never reports a non-finite break-even, whatever the margin", () => {
+    for (const costPerUnit of [0, 10, 14, 1_000]) {
+      const k = computeMetrics(
+        buildModel({
+          company: { name: "Margins", startDate: "2026-01-01", horizonMonths: 36, industryKey: "other" },
+          revenueStreams: [
+            { id: "u", name: "Units", kind: "unit-sales", unitsMonth1: 100, monthlyGrowthRate: 0,
+              pricePerUnit: 10, costPerUnit },
+          ],
+          opex: [{ id: "r", name: "Rent", category: "rent", monthlyAmount: 5_000 }],
+        }),
+      );
+      const value = k.breakEven.monthlyRevenueRequired;
+      expect(value === null || Number.isFinite(value), `costPerUnit=${costPerUnit}`).toBe(true);
+    }
+  });
+
   it("reports a contribution margin consistent with the modelled COGS", () => {
     const m = buildModel(saasPlan);
     const k = computeMetrics(m);
@@ -116,6 +153,86 @@ describe("computeMetrics — underwriter ratios", () => {
       }),
     );
     expect(k.underwriter.minimumDscr).toBeNull();
+  });
+
+  /* ---- Which year coverage is read from -------------------------------
+     `dscrFirstFullYear` used to be `Math.floor(io / 12) + 1`, measured from
+     month one against the largest interest-only period of any facility. That
+     is off by one whenever the period is an exact multiple of twelve —
+     including zero, the intake default — so the great majority of plans had
+     their *second* year's coverage reported as their first full year.
+     Coverage improves with time, so the error only ever flattered. Nothing
+     asserted which year was chosen, which is how it survived. */
+  const coverageModel = (loans: {
+    id: string; name: string; month: number; principal: number;
+    annualRate: number; termMonths: number; interestOnlyMonths?: number;
+  }[]) =>
+    buildModel({
+      company: { name: "Coverage", startDate: "2026-01-01", horizonMonths: 60, industryKey: "other" },
+      revenueStreams: [
+        // Ramping, because that is the case the bug bit: coverage improves
+        // with time, so reading the wrong year is never neutral.
+        { id: "s", name: "Sales", kind: "unit-sales", unitsMonth1: 1000, monthlyGrowthRate: 0.02,
+          pricePerUnit: 100, costPerUnit: 40 },
+      ],
+      roles: [{ id: "o", title: "Owner", annualSalary: 120_000, isOwner: true, startMonth: 1 }],
+      opex: [{ id: "r", name: "Rent", category: "rent", monthlyAmount: 10_000 }],
+      loans,
+      tax: { corporateRate: 0, lossCarryforward: false },
+    });
+
+  const facility = (interestOnlyMonths: number, month = 1) => ({
+    id: `l${month}-${interestOnlyMonths}`, name: "Loan", month,
+    principal: 300_000, annualRate: 0.09, termMonths: 120, interestOnlyMonths,
+  });
+
+  it.each([
+    [0, 1],
+    [6, 2],
+    [12, 2],
+    [18, 3],
+    [24, 3],
+  ])("reads coverage from the first fully amortising year (io=%i → year %i)", (io, year) => {
+    const k = computeMetrics(coverageModel([facility(io)]));
+    expect(k.underwriter.dscrFirstFullYearYear).toBe(year);
+    expect(k.underwriter.dscrFirstFullYear).toBeCloseTo(
+      k.underwriter.dscrByYear[year - 1]!.dscr!,
+      9,
+    );
+  });
+
+  it.each([0, 6, 12, 18, 24])(
+    "never reports a year that still carries an interest-only month (io=%i)",
+    (io) => {
+      const loan = facility(io);
+      const k = computeMetrics(coverageModel([loan]));
+      const year = k.underwriter.dscrFirstFullYearYear!;
+      const lastInterestOnly = loan.month + io - 1;
+      expect((year - 1) * 12 + 1).toBeGreaterThan(lastInterestOnly);
+    },
+  );
+
+  it("measures each facility's interest-only window from its own draw month", () => {
+    // Drawn in month 13 with six interest-only months, so months 13–18 are
+    // interest-only and year three is the first clear of them. Taking the max
+    // of the bare `interestOnlyMonths` from month one could never see this.
+    const k = computeMetrics(coverageModel([facility(0), facility(6, 13)]));
+    expect(k.underwriter.dscrFirstFullYearYear).toBe(3);
+  });
+
+  it("reports the earlier, weaker year when there is no interest-only period", () => {
+    // The regression, stated as the ordering rather than a magic constant:
+    // year one is the honest answer and it is the less flattering one.
+    const k = computeMetrics(coverageModel([facility(0)]));
+    const [y1, y2] = k.underwriter.dscrByYear;
+    expect(k.underwriter.dscrFirstFullYearYear).toBe(1);
+    expect(k.underwriter.dscrFirstFullYear).toBeCloseTo(y1!.dscr!, 9);
+    expect(y1!.dscr!).toBeLessThan(y2!.dscr!);
+  });
+
+  it("falls back to year one when the only debt is on the opening balance sheet", () => {
+    const k = computeMetrics(coverageModel([]));
+    expect(k.underwriter.dscrFirstFullYearYear).toBe(1);
   });
 });
 

@@ -580,7 +580,13 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
         { id: "ga", name: "Scheduling, payroll processing and admin", category: "other", percentOfRevenue: 0.05 },
       ],
       capex: [{ id: "eq", name: "Equipment and vehicles", month: 1, amount: 95_000, usefulLifeYears: 6 }],
-      loans: [{ id: "sba", name: "SBA 7(a)", month: 1, principal: 125_000, annualRate: 0.115, termMonths: 84 }],
+      // Three months interest-only, as every other startup example here has:
+      // the crew is hired and insured before the first contract is invoiced,
+      // so year one carries the ramp. Without it the first fully amortising
+      // year is year one, coverage there is negative, and the plan does not
+      // clear the 7(a) Small threshold — which is the honest reading, not a
+      // reason to score it on year two.
+      loans: [{ id: "sba", name: "SBA 7(a)", month: 1, principal: 125_000, annualRate: 0.115, termMonths: 84, interestOnlyMonths: 3 }],
       equityRounds: [{ id: "inj", name: "Owner injection", month: 1, amount: 120_000 }],
       workingCapital: { receivableDays: 38, payableDays: 21, inventoryDays: 0 },
       registry: estimated,
@@ -660,7 +666,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
         { id: "ga", name: "Factoring fees, compliance and admin", category: "other", percentOfRevenue: 0.03 },
       ],
       capex: [{ id: "trucks", name: "Tractors and trailers", month: 1, amount: 215_000, usefulLifeYears: 7 }],
-      loans: [{ id: "eq", name: "Equipment finance", month: 1, principal: 170_000, annualRate: 0.118, termMonths: 72 }],
+      loans: [{ id: "eq", name: "Equipment finance", month: 1, principal: 170_000, annualRate: 0.118, termMonths: 72, interestOnlyMonths: 3 }],
       equityRounds: [{ id: "inj", name: "Owner injection", month: 1, amount: 70_000 }],
       // Factoring is paid for in opex above, so receivable days have to reflect
       // it. Charging the fee and still carrying 42 days counts the same cash gap
@@ -832,7 +838,7 @@ export const INDUSTRY_PAGES: IndustryPage[] = [
         { id: "ga", name: "Scheduling, licences and admin", category: "other", percentOfRevenue: 0.05 },
       ],
       capex: [{ id: "eq", name: "Trucks, trailers and mowers", month: 1, amount: 140_000, usefulLifeYears: 6 }],
-      loans: [{ id: "eqf", name: "Equipment finance", month: 1, principal: 115_000, annualRate: 0.112, termMonths: 72 }],
+      loans: [{ id: "eqf", name: "Equipment finance", month: 1, principal: 115_000, annualRate: 0.112, termMonths: 72, interestOnlyMonths: 3 }],
       equityRounds: [{ id: "inj", name: "Owner injection", month: 1, amount: 155_000 }],
       workingCapital: { receivableDays: 28, payableDays: 24, inventoryDays: 4 },
       registry: estimated,

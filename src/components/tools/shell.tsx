@@ -217,6 +217,7 @@ export function ConfigNote({
   effectiveFrom,
   effectiveTo,
   confidence,
+  stale = false,
 }: {
   label: string;
   value: string;
@@ -224,6 +225,8 @@ export function ConfigNote({
   effectiveFrom: string;
   effectiveTo?: string;
   confidence: "verified" | "secondary" | "unverified";
+  /** The window on this figure has closed and no successor is configured. */
+  stale?: boolean;
 }) {
   return (
     <div className="rounded-sm border border-hairline p-4 text-xs leading-relaxed text-tertiary">
@@ -234,6 +237,13 @@ export function ConfigNote({
         {source} · in force from {effectiveFrom}
         {effectiveTo ? ` to ${effectiveTo}` : " (no end date on record)"}
       </p>
+      {stale ? (
+        <p className="mt-1.5 text-warning">
+          This figure&rsquo;s window closed{effectiveTo ? ` on ${effectiveTo}` : ""} and its
+          successor is not yet configured. It is the last value on record, not
+          the current one.
+        </p>
+      ) : null}
       {confidence === "unverified" ? (
         <p className="mt-1.5 text-warning">
           Unverified — this figure is in our verification queue and must not be

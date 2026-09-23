@@ -158,9 +158,75 @@ const REASON_LABELS: Record<string, string> = {
   regeneration: "Before a regeneration",
   intake: "Intake completed",
   manual: "Manual snapshot",
+  restore: "Before a restore",
   import: "Imported",
 };
 
 export function reasonLabel(reason: string): string {
   return REASON_LABELS[reason] ?? "Snapshot";
+}
+
+/** The reason `restoreVersionAction` stamps on its own safety snapshot. It is
+ *  named so undo can tell the user's history from its own bookkeeping. */
+export const RESTORE_REASON = "restore";
+
+/**
+ * What a restore writes back.
+ *
+ * `snapshotPlan` stores four things — assumptions, registry, context and
+ * sections — and the restore used to write back only the sections. Restoring
+ * the automatic "Intake completed" snapshot therefore rolled the prose back
+ * and left the changed assumptions in place, so the document and the model
+ * disagreed. That is the one failure mode the product exists to prevent, and
+ * it was reachable from a button labelled "Restore this".
+ *
+ * A field absent from the snapshot means the snapshot predates the field, not
+ * that it was empty — so it is omitted rather than written as a blank, which
+ * would erase a plan's assumptions on restoring an old version.
+ */
+export function restorePayload(
+  snapshot: PlanSnapshot,
+  liveSectionKeys: string[],
+): {
+  plan: { assumptionsJson?: string; registryJson?: string; contextJson?: string };
+  sections: { key: string; status: string; contentJson: string; contentText: string }[];
+} {
+  const plan: { assumptionsJson?: string; registryJson?: string; contextJson?: string } = {};
+  if (snapshot.assumptions !== undefined) plan.assumptionsJson = snapshot.assumptions;
+  if (snapshot.registry !== undefined) plan.registryJson = snapshot.registry;
+  if (snapshot.context !== undefined) plan.contextJson = snapshot.context;
+
+  // A section dropped from PLAN_SECTIONS since the snapshot must not come back.
+  const live = new Set(liveSectionKeys);
+  const sections = (snapshot.sections ?? []).filter((s) => live.has(s.key));
+
+  return { plan, sections };
+}
+
+/**
+ * Which snapshot "Undo last change" should restore.
+ *
+ * Undo used to take the most recent snapshot and hand it to the restore, which
+ * takes a fresh snapshot of its own before writing. That snapshot then *was*
+ * the most recent, so a second click restored the state the first click had
+ * just undone — a ping-pong, not an undo stack.
+ *
+ * So the restore's own bookkeeping is skipped, and a history whose newest
+ * entry is one is reported as already undone. That keeps "restoring is itself
+ * reversible" — the safety snapshot is still in the list and still restorable
+ * from the history page — while stopping undo from grabbing it.
+ */
+export function pickRevertTarget(
+  versions: { id: string; reason: string }[],
+): { kind: "restore"; versionId: string } | { kind: "none"; reason: string } {
+  const [newest] = versions;
+  if (!newest) return { kind: "none", reason: "No snapshot to restore." };
+  if (newest.reason === RESTORE_REASON) {
+    return {
+      kind: "none",
+      reason:
+        "The last change has already been undone. Pick a point from the version history to go further back.",
+    };
+  }
+  return { kind: "restore", versionId: newest.id };
 }

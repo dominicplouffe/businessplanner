@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { signIn, signUp } from "@/lib/auth-client";
+import { safeInternalPath } from "@/lib/redirects";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 
@@ -13,7 +14,9 @@ const MIN_PASSWORD = 10;
 export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") ?? "/dashboard";
+  // Validated, not trusted: this value comes from the query string, and it is
+  // used to redirect somebody the moment they have authenticated.
+  const next = safeInternalPath(params.get("next"));
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");

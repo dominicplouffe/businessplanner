@@ -175,7 +175,21 @@ export function buildModel(input: AssumptionsInput | Assumptions): FinancialMode
      Runs after revenue is summed above, so `revenue` is complete and there is
      no circularity — a staffing rule reads the month's revenue, and a revenue
      stream never reads payroll. */
-  const loadFactor = 1 + a.payroll.payrollTaxRate + a.payroll.benefitsRate;
+  /* The load, split so the wage base can bite.
+
+     It used to be a single `1 + payrollTaxRate + benefitsRate` applied to
+     every dollar of wage, which charges the 6.2% OASDI half on salaries far
+     above the base — roughly $7k a year of employer tax nobody owes, on every
+     high earner. `FICA_WAGE_BASE` was configured, named in the project's own
+     rules, and read by nothing.
+
+     Medicare and benefits stay uncapped; only `cappedTaxRate` stops, and it
+     stops per employee per *calendar* year, which is why the accumulator
+     below is keyed on the calendar and not on the model's own year one. */
+  const uncappedRate =
+    1 + Math.max(0, a.payroll.payrollTaxRate - a.payroll.cappedTaxRate) + a.payroll.benefitsRate;
+  const cappedRate = Math.min(a.payroll.cappedTaxRate, a.payroll.payrollTaxRate);
+  const wageBase = a.payroll.taxableWageBase;
   const directLabour = zeros(n);
   const payrollOpex = zeros(n);
   const ownerCompensation = zeros(n);
@@ -206,6 +220,11 @@ export function buildModel(input: AssumptionsInput | Assumptions): FinancialMode
     const raise = role.annualRaiseRate ?? a.payroll.annualSalaryInflation;
     const last = role.endMonth ?? n;
     let ratchet = 0;
+    /* Wages paid to one head of this role so far in the calendar year. Heads
+       within a role are identical earners, so one accumulator serves them
+       all; it resets in January, which is when the wage base does. */
+    let ytdWagePerHead = 0;
+    let ytdCalendarYear = -1;
 
     for (let m = role.startMonth; m <= Math.min(last, n); m++) {
       const i = m - 1;
@@ -231,8 +250,19 @@ export function buildModel(input: AssumptionsInput | Assumptions): FinancialMode
       // Indexed from the role's own start, mirroring the opex inflator, so a
       // role's first twelve months sit at the salary it was offered.
       const yearsElapsed = Math.floor((m - role.startMonth) / 12);
+      const wagePerHead = (role.annualSalary / 12) * Math.pow(1 + raise, yearsElapsed);
+
+      // Calendar year of this model month, so the wage base resets in January.
+      const calendarYear = Math.floor((startCalendarMonth - 1 + (m - 1)) / 12);
+      if (calendarYear !== ytdCalendarYear) {
+        ytdCalendarYear = calendarYear;
+        ytdWagePerHead = 0;
+      }
+      const taxableThisMonth = Math.max(0, Math.min(wagePerHead, wageBase - ytdWagePerHead));
+      ytdWagePerHead += wagePerHead;
+
       const monthlyLoaded =
-        (role.annualSalary / 12) * heads * loadFactor * Math.pow(1 + raise, yearsElapsed);
+        (wagePerHead * uncappedRate + taxableThisMonth * cappedRate) * heads;
 
       if (role.isDirectLabour) directLabour[i] = at(directLabour, i) + monthlyLoaded;
       else payrollOpex[i] = at(payrollOpex, i) + monthlyLoaded;

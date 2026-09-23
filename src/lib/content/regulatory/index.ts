@@ -32,17 +32,57 @@ export type DatedValue<T> = {
   note?: string;
 };
 
-/** Returns the entry in force on `asOf`, or the latest one that has started. */
-export function inForce<T>(entries: DatedValue<T>[], asOf: Date = new Date()): DatedValue<T> {
-  const iso = asOf.toISOString().slice(0, 10);
+/**
+ * The timezone these dates are in.
+ *
+ * SBA and USCIS effective dates are US federal dates, and the comparison used
+ * to be `toISOString()`, i.e. UTC — so a transition fired up to seven hours
+ * early for a user on the west coast, on the one day a lending threshold
+ * changes. The server's own local time is not the cure either: it would make
+ * the engine's output depend on where the container runs, and the print
+ * route, the workbook and the test suite could then disagree. So it is
+ * pinned.
+ */
+const REGULATORY_TIME_ZONE = "America/New_York";
+
+const isoDay = new Intl.DateTimeFormat("en-CA", {
+  timeZone: REGULATORY_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** Newest first. A real comparator: the old one returned -1 for equal keys and
+ *  never 0, so two entries sharing a start date sorted arbitrarily. */
+const byEffectiveFromDesc = <T>(x: DatedValue<T>, y: DatedValue<T>) =>
+  y.effectiveFrom.localeCompare(x.effectiveFrom);
+
+/**
+ * The entry in force on `asOf`.
+ *
+ * `stale` is the important part. When nothing is in force this still returns
+ * the latest entry — throwing would take the product down on a date nobody
+ * wrote down, which is worse — but it says so, and the callers that present a
+ * figure to a user can say so too. Without the flag the `effectiveTo` window
+ * was silently discarded on the one path where it matters:
+ * `EB5_MINIMUM_INVESTMENT` expires on 2027-01-01 with no successor
+ * configured, and every caller would have gone on receiving $1,050,000 as
+ * though it were current.
+ */
+export function inForce<T>(
+  entries: DatedValue<T>[],
+  asOf: Date = new Date(),
+): DatedValue<T> & { stale: boolean } {
+  const iso = isoDay.format(asOf);
   const active = entries.filter(
     (e) => e.effectiveFrom <= iso && (e.effectiveTo === undefined || iso < e.effectiveTo),
   );
-  const chosen = active.sort((x, y) => (x.effectiveFrom < y.effectiveFrom ? 1 : -1))[0];
-  if (chosen) return chosen;
-  const fallback = [...entries].sort((x, y) => (x.effectiveFrom < y.effectiveFrom ? 1 : -1))[0];
+  const chosen = [...active].sort(byEffectiveFromDesc)[0];
+  if (chosen) return { ...chosen, stale: false };
+
+  const fallback = [...entries].sort(byEffectiveFromDesc)[0];
   if (!fallback) throw new Error("No dated values configured");
-  return fallback;
+  return { ...fallback, stale: true };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -124,10 +164,18 @@ export const FICA_WAGE_BASE: DatedValue<number>[] = [
   },
 ];
 
-/** Employer payroll tax and benefits load, as a fraction of gross wages. */
-export const PAYROLL_LOAD: DatedValue<{ payrollTaxRate: number; benefitsRate: number }>[] = [
+/** Employer payroll tax and benefits load, as a fraction of gross wages.
+ *
+ *  `oasdiRate` is broken out because it is the only portion the wage base
+ *  caps: HI is charged on every dollar. Splitting it here rather than in the
+ *  engine keeps the whole payroll load in one dated place. */
+export const PAYROLL_LOAD: DatedValue<{
+  payrollTaxRate: number;
+  benefitsRate: number;
+  oasdiRate: number;
+}>[] = [
   {
-    value: { payrollTaxRate: 0.0765, benefitsRate: 0.12 },
+    value: { payrollTaxRate: 0.0765, benefitsRate: 0.12, oasdiRate: 0.062 },
     effectiveFrom: "2026-01-01",
     source: { label: "FICA statutory rate; BLS ECEC benefit share", retrieved: "2026-09-19" },
     confidence: "secondary",
@@ -219,7 +267,7 @@ export const CONFIG_VINTAGE = {
 export function sbaProgrammeForLoan(
   totalPrincipal: number,
   asOf?: Date,
-): { programme: SbaProgramme; ceiling: DatedValue<number> } {
+): { programme: SbaProgramme; ceiling: DatedValue<number> & { stale: boolean } } {
   const ceiling = inForce(SBA_SMALL_LOAN_CEILING, asOf);
   return {
     programme: totalPrincipal <= ceiling.value ? "7a-small" : "7a-standard",
@@ -228,6 +276,32 @@ export function sbaProgrammeForLoan(
 }
 
 /** Convenience: the DSCR threshold in force for a programme today. */
-export function dscrThreshold(programme: SbaProgramme, asOf?: Date): DatedValue<number> {
+export function dscrThreshold(
+  programme: SbaProgramme,
+  asOf?: Date,
+): DatedValue<number> & { stale: boolean } {
   return inForce(DSCR_THRESHOLDS[programme], asOf);
+}
+
+/**
+ * Every dated series this product reads, and whether it is still in force.
+ *
+ * An expiry that nobody notices is the failure mode the whole dated-config
+ * mechanism exists to prevent, and until `inForce` reported staleness there
+ * was no way to ask. Deliberately covers the values that are actually read:
+ * the EB-5 thresholds have a known unconfigured successor and are tracked in
+ * `CONFIG_VINTAGE.verificationQueue` instead, because a test that cannot be
+ * made to pass is a test people learn to ignore.
+ */
+export function staleSeries(asOf: Date = new Date()): string[] {
+  const series: [string, DatedValue<unknown>[]][] = [
+    ["DSCR_THRESHOLDS.7a-standard", DSCR_THRESHOLDS["7a-standard"]],
+    ["DSCR_THRESHOLDS.7a-small", DSCR_THRESHOLDS["7a-small"]],
+    ["DSCR_THRESHOLDS.504", DSCR_THRESHOLDS["504"]],
+    ["SBA_SMALL_LOAN_CEILING", SBA_SMALL_LOAN_CEILING],
+    ["EQUITY_INJECTION_MINIMUM", EQUITY_INJECTION_MINIMUM],
+    ["FICA_WAGE_BASE", FICA_WAGE_BASE],
+    ["PAYROLL_LOAD", PAYROLL_LOAD],
+  ];
+  return series.filter(([, entries]) => inForce(entries, asOf).stale).map(([name]) => name);
 }

@@ -1,7 +1,14 @@
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { scorePlan, type PlanPurpose, type ReviewInput } from "@/lib/review/rubric";
+import {
+  PLAN_PURPOSES,
+  asPlanPurpose,
+  scorePlan,
+  type PlanPurpose,
+  type ReviewInput,
+} from "@/lib/review/rubric";
 import { buildFixQueue, intakeStepIndex } from "@/lib/review/queue";
-import { INTAKE_STEPS } from "@/lib/content/intake";
+import { INTAKE_STEPS, PURPOSES } from "@/lib/content/intake";
 import { buildModel } from "@/lib/finance/engine";
 import { computeMetrics } from "@/lib/finance/metrics";
 import { validateModel, type ValidationResult } from "@/lib/finance/validate";
@@ -57,6 +64,21 @@ describe("scorePlan", () => {
     }
   });
 
+  /* `WEIGHTS[input.purpose]` and then `weights[key]`, both unguarded, against
+     a column with no constraint and a server action that took any string. */
+  it("scores a plan whose stored purpose is not one it knows", () => {
+    const readiness = scorePlan(inputFor(restaurantPlan, asPlanPurpose("not-a-purpose")));
+    expect(readiness.dimensions).toHaveLength(5);
+    const total = readiness.dimensions.reduce((sum, d) => sum + d.weight, 0);
+    expect(total).toBeCloseTo(1, 6);
+  });
+
+  it("keeps the wizard's options and the rubric's weights in step", () => {
+    // They matched only by coincidence. An option the rubric has no weights
+    // for is a crash on the plan page, the review and the export.
+    expect(new Set(PURPOSES.map((p) => p.value))).toEqual(new Set(PLAN_PURPOSES));
+  });
+
   it("asks a different reader's question for each purpose", () => {
     const lender = scorePlan(inputFor(restaurantPlan, "sba-loan"));
     const investor = scorePlan(inputFor(saasPlan, "investor"));
@@ -68,6 +90,26 @@ describe("scorePlan", () => {
     expect(readerLabels(lender)).toMatch(/Coverage clears/);
     expect(readerLabels(investor)).toMatch(/Lifetime value/);
     expect(readerLabels(adjudicator)).toMatch(/Household size/);
+  });
+
+  /* `passed: monthlyRevenueRequired > 0` was true for `Infinity`, so the one
+     check that exists to catch a plan with no break-even was the one check
+     guaranteed to pass on it. */
+  it("fails the break-even check on a plan that cannot break even", () => {
+    const belowCost = AssumptionsSchema.parse({
+      company: { name: "Below cost", startDate: "2026-01-01", horizonMonths: 36, industryKey: "other" },
+      revenueStreams: [
+        { id: "u", name: "Units", kind: "unit-sales", unitsMonth1: 100, monthlyGrowthRate: 0,
+          pricePerUnit: 10, costPerUnit: 14 },
+      ],
+      opex: [{ id: "r", name: "Rent", category: "rent", monthlyAmount: 5_000 }],
+    });
+    const readiness = scorePlan(inputFor(belowCost));
+    const check = readiness.dimensions
+      .flatMap((d) => d.checks)
+      .find((c) => c.label === "Break-even is computed, not asserted")!;
+    expect(check.passed).toBe(false);
+    expect(check.detail).toMatch(/no level of demand/i);
   });
 
   it("holds the score below passing whenever anything is blocking", () => {
@@ -263,6 +305,84 @@ describe("buildFixQueue", () => {
     // None of them may point at the read-only workspace.
     for (const item of queue) {
       expect(item.href).not.toBe("/plans/p1/financials");
+    }
+  });
+
+  /* The market findings are about structured data — the sizing builder, the
+     competitor matrix, the sources appendix — and all three used to route to
+     `/sections/market`, the prose editor, which has no control that can clear
+     any of them. Three *blocking* findings, each a dead end. */
+  it("sends every market finding to the control that fixes it", () => {
+    const cases = [
+      ["/market/sizing", "/plans/p1/market#sizing"],
+      ["/market/competitors", "/plans/p1/market#competitors"],
+      ["/market/sources", "/plans/p1/market#sources"],
+      ["/competition", "/plans/p1/market#competitors"],
+    ] as const;
+
+    for (const [anchor, href] of cases) {
+      const validation: ValidationResult = {
+        findings: [
+          {
+            id: "x",
+            severity: "blocking",
+            title: "t",
+            detail: "d",
+            remedy: "r",
+            anchor,
+          },
+        ],
+        blockingCount: 1,
+        warningCount: 0,
+        canExport: false,
+      };
+      const queue = buildFixQueue("p1", validation, checkPlan([], index), "USD");
+      expect(queue[0]!.href, anchor).toBe(href);
+    }
+  });
+
+  /* The guard that makes the tables above checkable: a new anchor that nobody
+     maps falls through to the plan page, and a validator finding must never
+     do that. Until now an unmapped anchor was concatenated into a URL, which
+     is how `/review/consistency` became a link to a route that does not
+     exist. */
+  it("maps every anchor the validator can emit", () => {
+    const source = readFileSync("src/lib/finance/validate.ts", "utf8");
+    const anchors = [...source.matchAll(/anchor:\s*"([^"]+)"/g)].map((m) => m[1]!);
+    expect(anchors.length).toBeGreaterThan(5);
+
+    for (const anchor of [...new Set(anchors)]) {
+      const validation: ValidationResult = {
+        findings: [
+          { id: "x", severity: "blocking", title: "t", detail: "d", remedy: "r", anchor },
+        ],
+        blockingCount: 1,
+        warningCount: 0,
+        canExport: false,
+      };
+      const queue = buildFixQueue("p1", validation, checkPlan([], index), "USD");
+      expect(queue[0]!.href, `${anchor} fell through to the plan page`).not.toBe("/plans/p1");
+    }
+  });
+
+  it("only links to screens the app actually has", () => {
+    // typedRoutes is off, so nothing else stops a finding linking to a 404.
+    const source = readFileSync("src/lib/finance/validate.ts", "utf8");
+    const anchors = [...new Set([...source.matchAll(/anchor:\s*"([^"]+)"/g)].map((m) => m[1]!))];
+
+    for (const anchor of anchors) {
+      const validation: ValidationResult = {
+        findings: [
+          { id: "x", severity: "blocking", title: "t", detail: "d", remedy: "r", anchor },
+        ],
+        blockingCount: 1,
+        warningCount: 0,
+        canExport: false,
+      };
+      const href = buildFixQueue("p1", validation, checkPlan([], index), "USD")[0]!.href!;
+      const route = href.replace("/plans/p1", "").replace(/[#?].*$/, "");
+      const dir = `src/app/(app)/plans/[planId]${route}`;
+      expect(existsSync(dir), `${anchor} → ${href} (no ${dir})`).toBe(true);
     }
   });
 

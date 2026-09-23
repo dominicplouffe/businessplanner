@@ -267,7 +267,11 @@ export function FinancialWorkspace({ assumptions }: { assumptions: Assumptions }
           />
           <Stat
             label="Monthly revenue to break even"
-            value={exact(be.monthlyRevenueRequired)}
+            value={
+              be.monthlyRevenueRequired === null
+                ? "Not reachable"
+                : exact(be.monthlyRevenueRequired)
+            }
             note={`At a ${formatPercent(be.contributionMarginRatio)} contribution margin`}
           />
           <Stat

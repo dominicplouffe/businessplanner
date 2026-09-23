@@ -163,6 +163,7 @@ export function DscrCalculator({ buildDate }: { buildDate: string }) {
               effectiveFrom={r.threshold.effectiveFrom}
               effectiveTo={r.threshold.effectiveTo}
               confidence={r.threshold.confidence}
+              stale={r.threshold.stale}
             />
             {programmeChoice === "auto" ? (
               <ConfigNote
@@ -172,6 +173,7 @@ export function DscrCalculator({ buildDate }: { buildDate: string }) {
                 effectiveFrom={r.derived.ceiling.effectiveFrom}
                 effectiveTo={r.derived.ceiling.effectiveTo}
                 confidence={r.derived.ceiling.confidence}
+                stale={r.derived.ceiling.stale}
               />
             ) : null}
           </div>

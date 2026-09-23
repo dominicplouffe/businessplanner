@@ -1,5 +1,6 @@
 import { INDUSTRY_BENCHMARKS } from "@/lib/finance/benchmarks";
 import type { RevenueStreamKind } from "@/lib/finance/types";
+import type { PlanPurpose } from "@/lib/review/rubric";
 
 /* ==========================================================================
    The intake, defined as data.
@@ -50,7 +51,10 @@ export const REVENUE_MODELS: {
   { kind: "advertising", label: "Advertising", blurb: "Impressions sold against a CPM.", examples: "Media, publishing, ad-supported app" },
 ];
 
-export const PURPOSES = [
+/** Labels for the four purposes. Typed against `PlanPurpose` so the wizard
+ *  cannot offer an option the rubric has no weights for — the two lists were
+ *  identical only by coincidence, and the rubric indexes its table bare. */
+export const PURPOSES: { value: PlanPurpose; label: string; hint: string }[] = [
   { value: "investor", label: "Raising from investors", hint: "Angels, pre-seed or seed." },
   { value: "sba-loan", label: "A bank or SBA loan", hint: "Adds the underwriter ratios and a debt schedule." },
   { value: "immigration", label: "An immigration filing", hint: "E-2, L-1A or EB-5 document structure." },

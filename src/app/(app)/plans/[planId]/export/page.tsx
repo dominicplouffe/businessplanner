@@ -66,7 +66,12 @@ export default async function ExportPage({ params }: { params: Promise<{ planId:
         }
         actions={
           <>
-            <ButtonLink href={`/print/${plan.id}`} variant="secondary" target="_blank">
+            <ButtonLink
+              href={`/print/${plan.id}`}
+              variant="secondary"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               Preview the document
               <ExternalLink aria-hidden className="size-4" />
             </ButtonLink>

@@ -8,6 +8,8 @@ import { billingIsLive } from "@/lib/billing";
 import { requireUser, getOrCreateWorkspace } from "@/lib/session";
 import { simulatePaymentAction } from "@/lib/actions/billing-actions";
 import { pricing } from "@/lib/brand";
+import { siteUrl } from "@/lib/env";
+import { safeInternalPath } from "@/lib/redirects";
 import { SimulateButton } from "@/components/app/billing/simulate-button";
 
 /* The development stand-in for Stripe's hosted checkout. Present only when no
@@ -26,7 +28,11 @@ export default async function SimulateCheckoutPage({
 
   const params = await searchParams;
   const kind = single(params.kind);
-  const next = single(params.next) ?? "/dashboard";
+  /* Absolute by design here — `provider.ts` builds the return URL from
+     `siteUrl` — so the origin is allowed and then reduced to a path. It is
+     still validated: this page calls `redirect(next)` below, and being
+     dev-only is not a reason for it to be the one place the rule is skipped. */
+  const next = safeInternalPath(single(params.next), "/dashboard", { origin: siteUrl });
 
   const user = await requireUser();
   const workspace = await getOrCreateWorkspace(user.id, user.name);
@@ -36,7 +42,7 @@ export default async function SimulateCheckoutPage({
   if (kind !== "unlock" && kind !== "subscription") notFound();
 
   const planId = single(params.planId);
-  const cancel = single(params.cancel) ?? "/dashboard";
+  const cancel = safeInternalPath(single(params.cancel), "/dashboard", { origin: siteUrl });
   const isUnlock = kind === "unlock";
 
   return (

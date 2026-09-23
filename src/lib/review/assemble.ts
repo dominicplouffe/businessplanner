@@ -13,7 +13,7 @@ import { PLAN_SECTIONS } from "@/lib/content/sections";
 import { MarketSizingSchema } from "@/lib/market/sizing";
 import { ResilienceSchema } from "@/lib/market/resilience";
 import { buildValidationContext } from "./context";
-import { scorePlan, type MarketEvidence, type PlanPurpose } from "./rubric";
+import { asPlanPurpose, scorePlan, type MarketEvidence } from "./rubric";
 import { buildFixQueue } from "./queue";
 
 /* ==========================================================================
@@ -36,7 +36,7 @@ export type ReviewablePlan = {
 };
 
 export function assembleReview(plan: ReviewablePlan, assumptions: Assumptions) {
-  const purpose = plan.purpose as PlanPurpose;
+  const purpose = asPlanPurpose(plan.purpose);
   const model = buildModel(assumptions);
   const metrics = computeMetrics(model);
 

@@ -25,7 +25,29 @@ import { dscrThreshold, inForce, sbaProgrammeForLoan, EQUITY_INJECTION_MINIMUM }
    owner can live on what the business pays them.
    ========================================================================== */
 
-export type PlanPurpose = "sba-loan" | "investor" | "immigration" | "internal";
+/** The four readers a plan can be written for. One source of truth: the
+ *  intake wizard's options, the action's schema and the rubric's weights all
+ *  derive from this, so they cannot drift apart. */
+export const PLAN_PURPOSES = ["sba-loan", "investor", "immigration", "internal"] as const;
+
+export type PlanPurpose = (typeof PLAN_PURPOSES)[number];
+
+/**
+ * A stored purpose, narrowed to one the rubric can score.
+ *
+ * `scorePlan` indexes `WEIGHTS[input.purpose]` and then `weights[key]`, so an
+ * unrecognised value threw a TypeError on the plan page, the review, the
+ * export screen and the export API. The wizard only ever offers the four, so
+ * this was not reachable through the UI — but the value arrives through a
+ * server action, which is directly invocable, and the column has no
+ * constraint. Falling back to `internal` matches the database's own default
+ * and degrades to the least demanding rubric rather than a crash.
+ */
+export function asPlanPurpose(value: string | null | undefined): PlanPurpose {
+  return (PLAN_PURPOSES as readonly string[]).includes(value ?? "")
+    ? (value as PlanPurpose)
+    : "internal";
+}
 
 export type RubricDimensionKey = "model" | "document" | "consistency" | "evidence" | "reader";
 
@@ -131,11 +153,15 @@ function modelChecks(input: ReviewInput): RubricCheck[] {
     },
     {
       label: "Break-even is computed, not asserted",
-      passed: metrics.breakEven.monthlyRevenueRequired > 0,
+      // Was `> 0`, and `Infinity > 0` is true — so this passed exactly on the
+      // plans with no break-even at all, the worst case it exists to catch.
+      passed: metrics.breakEven.monthlyRevenueRequired !== null,
       detail:
-        metrics.breakEven.profitMonth !== null
-          ? `Operating profit from month ${metrics.breakEven.profitMonth}.`
-          : "Not reached inside the horizon, which is itself a finding.",
+        metrics.breakEven.monthlyRevenueRequired === null
+          ? "Contribution margin is not positive, so no level of demand reaches break-even."
+          : metrics.breakEven.profitMonth !== null
+            ? `Operating profit from month ${metrics.breakEven.profitMonth}.`
+            : "Not reached inside the horizon, which is itself a finding.",
     },
     {
       label: "Cash never goes negative without a financing line behind it",
@@ -305,7 +331,10 @@ function readerChecks(input: ReviewInput): RubricCheck[] {
         detail:
           dscr === null
             ? "No debt service to cover."
-            : `${dscr.toFixed(2)}× against ${threshold.value.toFixed(2)}× for ${programme} (${threshold.source.label}).`,
+            : // Naming the year matters: which one this is read from was wrong
+              // for every plan without an interest-only period, and a reader
+              // had no way to tell.
+              `${dscr.toFixed(2)}× in year ${metrics.underwriter.dscrFirstFullYearYear ?? 1}, against ${threshold.value.toFixed(2)}× for ${programme} (${threshold.source.label}).`,
       },
       {
         label: `Equity injection reaches ${pct(minimum.value)}`,

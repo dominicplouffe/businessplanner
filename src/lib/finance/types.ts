@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { GrowthCurveSchema, MONTHLY_RATE_CEILING } from "./growth";
+import { FICA_WAGE_BASE, PAYROLL_LOAD, inForce } from "@/lib/content/regulatory";
 
 /* ==========================================================================
    Assumptions — the only user-supplied input to the model.
@@ -322,6 +323,58 @@ export const OpeningBalancesSchema = z.object({
 });
 export type OpeningBalances = z.infer<typeof OpeningBalancesSchema>;
 
+/**
+ * What an employee costs on top of their wage.
+ *
+ * Every default here is read from `src/lib/content/regulatory/`, which is the
+ * project's rule and was the one place it was broken: `0.0765` and `0.12` sat
+ * hardcoded in this schema while `PAYROLL_LOAD` held exactly those two
+ * numbers, with a source and an effective date, one import away — and was
+ * read by nothing. The same went for `FICA_WAGE_BASE`, which the engine never
+ * applied at all.
+ *
+ * The defaults are functions rather than literals on purpose: resolving
+ * `inForce` once at module load would freeze the date at import time, which
+ * is a subtler version of hardcoding it.
+ *
+ * A value the author supplies still wins. The config supplies what they did
+ * not answer; it does not overwrite what they did.
+ */
+export const PayrollSchema = z.object({
+  /** Employer payroll taxes as a fraction of gross wages. */
+  payrollTaxRate: z
+    .number()
+    .min(0)
+    .max(1)
+    .default(() => inForce(PAYROLL_LOAD).value.payrollTaxRate),
+  /** Benefits and other loaded costs as a fraction of gross wages. */
+  benefitsRate: z
+    .number()
+    .min(0)
+    .max(1)
+    .default(() => inForce(PAYROLL_LOAD).value.benefitsRate),
+  /** The portion of `payrollTaxRate` that stops at the wage base — OASDI.
+   *  The Medicare portion is charged on every dollar, so only this half is
+   *  capped, and a flat 7.65% on a high salary invents employer tax that
+   *  nobody owes. */
+  cappedTaxRate: z
+    .number()
+    .min(0)
+    .max(1)
+    .default(() => inForce(PAYROLL_LOAD).value.oasdiRate),
+  /** Wages per employee per calendar year above which `cappedTaxRate` stops. */
+  taxableWageBase: z
+    .number()
+    .min(0)
+    .default(() => inForce(FICA_WAGE_BASE).value),
+  /** Company-wide annual raise, for roles that do not state their own.
+   *  Defaults to zero so introducing it moves no existing number; a plan
+   *  that leaves it there is telling its reader nobody gets a raise for
+   *  five years, which `payroll-flat` says out loud. */
+  annualSalaryInflation: z.number().min(0).max(0.15).default(0),
+});
+export type Payroll = z.infer<typeof PayrollSchema>;
+
 export const AssumptionsSchema = z.object({
   company: z.object({
     name: z.string().min(1),
@@ -349,19 +402,7 @@ export const AssumptionsSchema = z.object({
   equityRounds: z.array(EquityRoundSchema).default([]),
   grants: z.array(GrantSchema).default([]),
 
-  payroll: z
-    .object({
-      /** Employer payroll taxes as a fraction of gross wages. */
-      payrollTaxRate: z.number().min(0).max(1).default(0.0765),
-      /** Benefits and other loaded costs as a fraction of gross wages. */
-      benefitsRate: z.number().min(0).max(1).default(0.12),
-      /** Company-wide annual raise, for roles that do not state their own.
-       *  Defaults to zero so introducing it moves no existing number; a plan
-       *  that leaves it there is telling its reader nobody gets a raise for
-       *  five years, which `payroll-flat` says out loud. */
-      annualSalaryInflation: z.number().min(0).max(0.15).default(0),
-    })
-    .default({ payrollTaxRate: 0.0765, benefitsRate: 0.12, annualSalaryInflation: 0 }),
+  payroll: PayrollSchema.default(() => PayrollSchema.parse({})),
 
   workingCapital: z
     .object({

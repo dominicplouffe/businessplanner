@@ -29,8 +29,14 @@ export type QueueItem = {
   hrefLabel?: string;
 };
 
-/** The aggregate the queue expands, so it is not also listed as an item. */
-const ROLLUP_IDS = new Set(["narrative-model-mismatch"]);
+/** The aggregates the queue expands, so they are not also listed as items.
+ *
+ *  Both are counted from the consistency findings — `narrative-model-mismatch`
+ *  from those with a near value in the model, `uncited-statistics` from those
+ *  without — and the queue lists every consistency finding individually below.
+ *  Only the first was listed here, so an uncited figure appeared twice: once
+ *  inside a count, and once as the specific, actionable item. */
+const ROLLUP_IDS = new Set(["narrative-model-mismatch", "uncited-statistics"]);
 
 /* --------------------------------------------------------------------------
    Where a finding actually gets fixed.
@@ -56,6 +62,25 @@ const ANCHOR_TO_STEP: [prefix: string, step: string, label: string][] = [
   ["/financials/debt", "funding", "Edit the funding and debt"],
   ["/financials/funding", "funding", "Edit the funding and debt"],
   ["/intake/revenue", "revenue", "Edit the revenue drivers"],
+];
+
+/**
+ * anchor prefix → the page that owns the control, longest first.
+ *
+ * The same defect the intake table above was written for, one screen along.
+ * Every `/market/*` anchor used to land on `/sections/market`, which is the
+ * *prose* editor — so three blocking findings about structured data sent the
+ * reader to a page with no control that could clear them. The sizing builder,
+ * the competitor matrix and the sources appendix all live on the market page
+ * and all carry a heading id, so each finding can point at its own control.
+ */
+const ANCHOR_TO_PAGE: [prefix: string, path: string, label: string][] = [
+  ["/market/sizing", "/market#sizing", "Open the market sizing"],
+  ["/market/competitors", "/market#competitors", "Open the competitor matrix"],
+  ["/market/sources", "/market#sources", "Open the sources appendix"],
+  ["/competition", "/market#competitors", "Open the competitor matrix"],
+  ["/market", "/market", "Open the market page"],
+  ["/review", "/review", "Open the review"],
 ];
 
 export function intakeStepIndex(stepKey: string): number {
@@ -90,15 +115,22 @@ function destinationFor(planId: string, finding: Finding): Destination | undefin
     };
   }
 
-  if (anchor.startsWith("/market") || anchor.startsWith("/competition")) {
-    return { href: `/plans/${planId}/sections/market`, hrefLabel: "Open the market section" };
+  for (const [prefix, path, label] of ANCHOR_TO_PAGE) {
+    if (anchor.startsWith(prefix)) {
+      return { href: `/plans/${planId}${path}`, hrefLabel: label };
+    }
   }
 
   if (anchor.startsWith("/intake") || anchor.startsWith("/assumptions")) {
     return { href: `/plans/${planId}/intake`, hrefLabel: "Open intake" };
   }
 
-  return { href: `/plans/${planId}${anchor}`, hrefLabel: "Go to it" };
+  /* An unmapped anchor is a bug in the tables above, and concatenating it
+     produced a link to a route that does not exist — `/review/consistency`
+     was exactly that, reachable the moment its finding stopped being a
+     rollup. `typedRoutes` is off, so nothing else would have caught it. The
+     plan page is somewhere real; the test asserts nothing reaches here. */
+  return { href: `/plans/${planId}`, hrefLabel: "Open the plan" };
 }
 
 function describeFigure(value: number, kind: string, currency: string): string {

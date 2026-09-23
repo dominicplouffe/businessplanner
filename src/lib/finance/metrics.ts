@@ -13,8 +13,10 @@ export type BreakEven = {
   profitMonth: number | null;
   /** First month after which cash never goes down again on a trailing basis. */
   cashFlowPositiveMonth: number | null;
-  /** Monthly revenue required to cover fixed costs at the current gross margin. */
-  monthlyRevenueRequired: number;
+  /** Monthly revenue required to cover fixed costs at the current gross margin.
+   *  Null when the contribution margin is not positive: a business that loses
+   *  money on every sale has no break-even revenue, and no volume reaches it. */
+  monthlyRevenueRequired: number | null;
   /** Units per month at break-even, when the model counts units. */
   monthlyUnitsRequired: number | null;
   contributionMarginRatio: number;
@@ -55,6 +57,8 @@ export type UnderwriterRatios = {
   minimumDscr: number | null;
   /** Coverage in the first full year after any interest-only period ends. */
   dscrFirstFullYear: number | null;
+  /** The year `dscrFirstFullYear` was read from. Null when there is no debt. */
+  dscrFirstFullYearYear: number | null;
   currentRatioByYear: { year: number; ratio: number | null }[];
   debtToEquityByYear: { year: number; ratio: number | null }[];
   /** Owner compensation by year. A plan showing zero fails on first review:
@@ -124,8 +128,14 @@ export function computeMetrics(model: FinancialModel): Metrics {
     totalRevenueTrading > 0 ? (totalRevenueTrading - totalCogsTrading) / totalRevenueTrading : 0;
 
   const averageMonthlyFixedCosts = mean(tradingMonths.map((i) => at(pnl.totalOpex, i)));
+  /* Null rather than Infinity. `Infinity` is a number: it satisfied
+     `monthlyRevenueRequired > 0`, so the rubric check named "Break-even is
+     computed, not asserted" passed precisely on the plans where it cannot be
+     computed — and it reached the facts block, where it would render as a
+     price and license a generator to write one. `monthlyUnitsRequired` below
+     has been null for the same reason all along. */
   const monthlyRevenueRequired =
-    contributionMarginRatio > 0 ? averageMonthlyFixedCosts / contributionMarginRatio : Infinity;
+    contributionMarginRatio > 0 ? averageMonthlyFixedCosts / contributionMarginRatio : null;
 
   // Units only mean something when a stream actually prices per unit.
   const unitStream = a.revenueStreams.find((s) => s.kind === "unit-sales");
@@ -191,11 +201,34 @@ export function computeMetrics(model: FinancialModel): Metrics {
     .filter((v): v is number => v !== null);
   const minimumDscr = dscrValues.length > 0 ? Math.min(...dscrValues) : null;
 
-  // The first year in which debt is fully amortising is the one a lender sizes
-  // against; an interest-only year flatters coverage.
-  const interestOnlyMonths = Math.max(0, ...a.loans.map((l) => l.interestOnlyMonths), 0);
-  const firstFullYearIndex = Math.min(annual.length - 1, Math.floor(interestOnlyMonths / 12) + 1);
+  /* The first year in which debt is fully amortising is the one a lender sizes
+     against; a year carrying even one interest-only month flatters coverage.
+
+     Derived per facility from that facility's own draw month, because both
+     halves of the old expression were wrong. It took `Math.max` of the bare
+     `interestOnlyMonths` across every loan and measured the window from month
+     one, so a facility drawn in month 13 had its interest-only period counted
+     against the wrong year — and `Math.floor(io / 12) + 1` is off by one
+     whenever the period is an exact multiple of twelve. Including zero, which
+     is the intake default: every plan with no interest-only period reported
+     year two. Coverage almost always improves with time, so the error ran in
+     the one direction that matters, reporting a ratio the plan does not
+     support.
+
+     A facility's last interest-only month is `loan.month + io - 1`, so the
+     first year clear of it is index `ceil((loan.month - 1 + io) / 12)`. A
+     bullet that never amortises is excluded rather than pushing the index past
+     the horizon, where it would clamp to the final year and flatter again. */
+  const amortisingYearIndices = a.loans
+    .filter((l) => l.principal > 0 && l.interestOnlyMonths < l.termMonths)
+    .map((l) => Math.ceil((l.month - 1 + l.interestOnlyMonths) / 12));
+  const firstFullYearIndex = Math.min(
+    annual.length - 1,
+    Math.max(0, ...amortisingYearIndices, 0),
+  );
   const dscrFirstFullYear = dscrByYear[firstFullYearIndex]?.dscr ?? minimumDscr;
+  /** Which year the coverage figure above belongs to, so a reader need not guess. */
+  const dscrFirstFullYearYear = dscrByYear[firstFullYearIndex]?.year ?? null;
 
   const currentRatioByYear = annual.map((y) => {
     const i = Math.min(n - 1, y.year * 12 - 1);
@@ -266,6 +299,7 @@ export function computeMetrics(model: FinancialModel): Metrics {
       dscrByYear,
       minimumDscr,
       dscrFirstFullYear,
+      dscrFirstFullYearYear,
       currentRatioByYear,
       debtToEquityByYear,
       ownerCompensationByYear: annual.map((y) => ({ year: y.year, amount: y.ownerCompensation })),

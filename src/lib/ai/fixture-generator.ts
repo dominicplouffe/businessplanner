@@ -144,7 +144,9 @@ function compose(ctx: GenerationContext): string {
       }
       if (stream) p.push(describeDrivers(stream, currency));
       p.push(
-        `At the modelled volumes, the business needs ${money(metrics.breakEven.monthlyRevenueRequired)} of revenue a month to cover its fixed costs. Whether that level of demand exists in the catchment is the question this section has to answer, and it is the assumption most worth testing before committing capital.`,
+        metrics.breakEven.monthlyRevenueRequired === null
+          ? `At the modelled prices the business does not cover its direct costs on a sale, so no level of demand reaches break-even. That is a pricing or cost question rather than a market one, and it has to be answered before the size of the catchment matters at all.`
+          : `At the modelled volumes, the business needs ${money(metrics.breakEven.monthlyRevenueRequired)} of revenue a month to cover its fixed costs. Whether that level of demand exists in the catchment is the question this section has to answer, and it is the assumption most worth testing before committing capital.`,
       );
       break;
     }
