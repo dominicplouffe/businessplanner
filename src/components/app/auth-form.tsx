@@ -54,6 +54,14 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
         return;
       }
 
+      /* Mid-way through an OAuth authorisation — an MCP client asking to
+         connect — the server answers with where the flow goes next, and the
+         auth client's redirect plugin is already navigating there. Pushing
+         `next` as well would race it, and could strand the client's request
+         on the dashboard. Navigating a second time aborts the first. */
+      const redirect = result.data as { redirect?: boolean; url?: string } | null;
+      if (redirect?.redirect && redirect.url) return;
+
       router.push(next);
       router.refresh();
     } catch (error) {
@@ -144,7 +152,9 @@ export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {
       <p className="mt-6 text-sm text-secondary">
         {isSignUp ? "Already have an account? " : "No account yet? "}
         <Link
-          href={isSignUp ? "/sign-in" : "/sign-up"}
+          // The query carries a signed OAuth request when a client is asking to
+          // connect; dropping it here would strand that request.
+          href={`${isSignUp ? "/sign-in" : "/sign-up"}${params.size > 0 ? `?${params}` : ""}`}
           className="font-medium text-accent underline-offset-4 hover:underline"
         >
           {isSignUp ? "Sign in" : "Create one"}

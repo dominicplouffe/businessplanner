@@ -125,6 +125,12 @@ export function defaultsForIndustry(industryKey: string): IntakeDefaults {
   };
 }
 
+/** The seeds for one revenue model's drivers, whichever model the industry
+ *  defaults to. */
+export function revenueSeedsFor(kind: RevenueStreamKind): IntakeDefaults {
+  return { ...REVENUE_SEEDS[kind] };
+}
+
 /** Which keys the seed supplied, so untouched fields can be tagged correctly. */
 /**
  * Every key this module can seed, across all seven revenue models.

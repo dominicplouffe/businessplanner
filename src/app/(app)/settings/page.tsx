@@ -3,6 +3,20 @@ import Link from "next/link";
 import { requireUser, getOrCreateWorkspace } from "@/lib/session";
 import { db } from "@/lib/db";
 import { brand } from "@/lib/brand";
+import { ConnectedApps } from "@/components/app/connected-apps";
+
+/** What each grant means, in the same words the consent page used. */
+const ACCESS_LABEL = (scopes: string[]) =>
+  scopes.includes("plans:write") ? "Reads and edits plans" : scopes.includes("plans:read") ? "Reads plans" : "Sign-in only";
+
+function parseScopes(stored: string): string[] {
+  try {
+    const value = JSON.parse(stored);
+    return Array.isArray(value) ? value.map(String) : [];
+  } catch {
+    return stored.split(/\s+/).filter(Boolean);
+  }
+}
 
 export const metadata: Metadata = { title: "Profile" };
 
@@ -14,9 +28,14 @@ export default async function ProfileSettingsPage() {
   const user = await requireUser("/settings");
   const workspace = await getOrCreateWorkspace(user.id, user.name);
 
-  const [planCount, memberCount] = await Promise.all([
+  const [planCount, memberCount, consents] = await Promise.all([
     db.plan.count({ where: { workspaceId: workspace.id, status: { not: "archived" } } }),
     db.workspaceMember.count({ where: { workspaceId: workspace.id } }),
+    db.oauthConsent.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      select: { clientId: true, scopes: true, createdAt: true, oauthclient: { select: { name: true } } },
+    }),
   ]);
 
   return (
@@ -44,6 +63,23 @@ export default async function ProfileSettingsPage() {
           <Row label="Plans" value={String(planCount)} numeric />
           <Row label="People" value={String(memberCount)} numeric />
         </dl>
+      </section>
+
+      <section aria-labelledby="apps">
+        <h2 id="apps" className="font-display text-xl">Connected apps</h2>
+        <p className="mt-2 text-sm leading-relaxed text-secondary">
+          Assistants such as Claude can work on your plans through {brand.name}&rsquo;s MCP
+          endpoint, <span className="numeric text-primary">{brand.url}/mcp</span>, once you
+          approve them. Disconnecting one stops it immediately.
+        </p>
+        <ConnectedApps
+          apps={consents.map((c) => ({
+            clientId: c.clientId,
+            name: c.oauthclient.name || "Unnamed app",
+            scopes: ACCESS_LABEL(parseScopes(c.scopes)),
+            connectedOn: DATE.format(new Date(c.createdAt)),
+          }))}
+        />
       </section>
 
       <section aria-labelledby="data">

@@ -11,14 +11,20 @@ these files, in order, and never infers anything.
 
 ## Adding one
 
+Diff the committed schema against the new one, both read as Postgres. This
+needs no database and no `migration_lock.toml` — `--from-migrations` needs
+both, and this repository has neither:
+
 ```
-pnpm db:provider postgresql
-pnpm exec prisma migrate diff \
-  --from-migrations prisma/migrations \
-  --to-schema prisma/schema.prisma \
+git show HEAD:prisma/schema.prisma | sed 's/provider = "sqlite"/provider = "postgresql"/' > /tmp/old.prisma
+sed 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma > /tmp/new.prisma
+mkdir prisma/migrations/<timestamp>_<name>
+pnpm exec prisma migrate diff --from-schema /tmp/old.prisma --to-schema /tmp/new.prisma \
   --script > prisma/migrations/<timestamp>_<name>/migration.sql
-pnpm db:provider sqlite        # leave the schema as it is committed
 ```
+
+The same command with `--from-empty` reproduces `20260920000000_init` byte for
+byte, which is how to check the method still holds.
 
 The commit must leave `provider = "sqlite"` in `schema.prisma`. The container
 build runs `db:provider postgresql` itself before generating the client, so the
