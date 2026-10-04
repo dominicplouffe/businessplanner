@@ -39,7 +39,12 @@ export function protectedResourceMetadata() {
        server's metadata from exactly the string named here — then refuses
        it if the document's `issuer` differs. */
     authorization_servers: [authIssuer],
-    scopes_supported: [...MCP_SCOPES],
+    /* `offline_access` is advertised, not just permitted. A client requests
+       what the resource metadata names, and the provider issues a refresh
+       token only when that scope is in the request — so leaving it out meant
+       every connection died an hour in with nothing to renew it, which is
+       exactly what happened to the second and third clients that registered. */
+    scopes_supported: [...MCP_SCOPES, "offline_access"],
     resource_name: "Venturelly",
     bearer_methods_supported: ["header"],
   });
