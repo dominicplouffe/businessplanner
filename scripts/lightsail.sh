@@ -116,7 +116,7 @@ check_env() {
   local missing=()
   for key in DATABASE_URL POSTGRES_PASSWORD BETTER_AUTH_SECRET BETTER_AUTH_URL NEXT_PUBLIC_SITE_URL \
              STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_PRICE_UNLOCK STRIPE_PRICE_LIVE \
-             ACME_EMAIL; do
+             ACME_EMAIL ADMIN_EMAILS; do
     [ -n "$(env_value "$key")" ] || missing+=("$key")
   done
   [ ${#missing[@]} -eq 0 ] || die "Missing in $ENV_FILE: ${missing[*]}

@@ -128,3 +128,47 @@ describe("derived values", () => {
     expect((await import("@/lib/env")).databaseKind).toBe("sqlite");
   });
 });
+
+/* ==========================================================================
+   The admin allowlist.
+   --------------------------------------------------------------------------
+   This decides who can give away paid access, so the case that matters most is
+   the unconfigured one: an admin surface that is open because nobody set the
+   variable is the failure worth a test.
+   ========================================================================== */
+describe("admin allowlist", () => {
+  const original = process.env.ADMIN_EMAILS;
+  afterEach(() => {
+    if (original === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = original;
+  });
+
+  it("admits nobody when it is not configured", async () => {
+    const { isAdminEmail } = await import("@/lib/env");
+    delete process.env.ADMIN_EMAILS;
+    expect(isAdminEmail("anyone@example.com")).toBe(false);
+
+    process.env.ADMIN_EMAILS = "";
+    expect(isAdminEmail("anyone@example.com")).toBe(false);
+    expect(isAdminEmail("")).toBe(false);
+  });
+
+  it("matches regardless of case or surrounding space", async () => {
+    const { isAdminEmail } = await import("@/lib/env");
+    process.env.ADMIN_EMAILS = " Owner@Example.com , second@example.com ";
+    expect(isAdminEmail("owner@example.com")).toBe(true);
+    expect(isAdminEmail("  OWNER@EXAMPLE.COM ")).toBe(true);
+    expect(isAdminEmail("second@example.com")).toBe(true);
+  });
+
+  it("admits nobody else", async () => {
+    const { isAdminEmail } = await import("@/lib/env");
+    process.env.ADMIN_EMAILS = "owner@example.com";
+    expect(isAdminEmail("intruder@example.com")).toBe(false);
+    expect(isAdminEmail(null)).toBe(false);
+    expect(isAdminEmail(undefined)).toBe(false);
+    // Not a prefix, suffix or substring match.
+    expect(isAdminEmail("owner@example.com.evil.test")).toBe(false);
+    expect(isAdminEmail("notowner@example.com")).toBe(false);
+  });
+});

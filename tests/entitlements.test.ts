@@ -51,6 +51,87 @@ describe("plan entitlements", () => {
   });
 });
 
+describe("grants", () => {
+  const unlockGrant = { kind: "unlock", expiresAt: null, revokedAt: null };
+
+  it("unlocks a plan nobody paid for, and says it was a grant", () => {
+    const e = entitlementsFor({ plan: { unlockedAt: null }, grants: [unlockGrant], asOf: NOW });
+    expect(e.canExport).toBe(true);
+    expect(e.canShare).toBe(true);
+    expect(e.unlockSource).toBe("grant");
+    expect(e.blockedReason).toBeNull();
+  });
+
+  it("reports a purchase as a purchase even when a grant also applies", () => {
+    // Re-granting something already bought must not rewrite why the person has
+    // it: they paid, and the billing page has to keep saying so.
+    const e = entitlementsFor({
+      plan: { unlockedAt: new Date("2026-01-01") },
+      grants: [unlockGrant],
+      asOf: NOW,
+    });
+    expect(e.unlockSource).toBe("purchase");
+  });
+
+  it("stops at the expiry", () => {
+    const expired = entitlementsFor({
+      plan: { unlockedAt: null },
+      grants: [{ kind: "unlock", expiresAt: new Date("2026-09-19"), revokedAt: null }],
+      asOf: NOW,
+    });
+    expect(expired.canExport).toBe(false);
+    expect(expired.unlockSource).toBeNull();
+
+    const current = entitlementsFor({
+      plan: { unlockedAt: null },
+      grants: [{ kind: "unlock", expiresAt: new Date("2026-09-21"), revokedAt: null }],
+      asOf: NOW,
+    });
+    expect(current.canExport).toBe(true);
+  });
+
+  it("stops when it is revoked", () => {
+    const e = entitlementsFor({
+      plan: { unlockedAt: null },
+      grants: [{ kind: "unlock", expiresAt: null, revokedAt: new Date("2026-09-19") }],
+      asOf: NOW,
+    });
+    expect(e.canExport).toBe(false);
+  });
+
+  it("keeps the two kinds apart, exactly as a purchase and a subscription are", () => {
+    // An unlock grant must not confer the subscription features and vice versa,
+    // for the same reason paying monthly does not unlock a plan.
+    const unlock = entitlementsFor({ plan: { unlockedAt: null }, grants: [unlockGrant], asOf: NOW });
+    expect(unlock.liveSubscription).toBe(false);
+
+    const liveOnly = entitlementsFor({
+      plan: { unlockedAt: null },
+      grants: [{ kind: "live", expiresAt: null, revokedAt: null }],
+      asOf: NOW,
+    });
+    expect(liveOnly.liveSubscription).toBe(true);
+    expect(liveOnly.liveSource).toBe("grant");
+    expect(liveOnly.canExport).toBe(false);
+  });
+
+  it("prefers a real subscription as the recorded source", () => {
+    const e = entitlementsFor({
+      plan: { unlockedAt: null },
+      subscription: { status: "active", currentPeriodEnd: new Date("2026-10-20"), cancelAtPeriodEnd: false },
+      grants: [{ kind: "live", expiresAt: null, revokedAt: null }],
+      asOf: NOW,
+    });
+    expect(e.liveSource).toBe("subscription");
+  });
+
+  it("is absent by default, so nothing is granted implicitly", () => {
+    const e = entitlementsFor({ plan: { unlockedAt: null }, asOf: NOW });
+    expect(e.unlockSource).toBeNull();
+    expect(e.liveSource).toBeNull();
+  });
+});
+
 describe("subscription liveness", () => {
   const end = new Date("2026-10-20T00:00:00Z");
 

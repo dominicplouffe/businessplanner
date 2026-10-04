@@ -29,11 +29,32 @@ export type SubscriptionState = {
   cancelAtPeriodEnd: boolean;
 };
 
+/**
+ * Access given without a payment.
+ *
+ * The caller passes only the grants that already apply to the plan in question
+ * — scoping by workspace and plan is a `where` clause, not a rule worth
+ * testing. What *is* worth testing, and so lives here, is whether a grant is
+ * still in force: expiry and revocation both have to be read against the same
+ * injected clock as everything else.
+ */
+export type GrantState = {
+  /** "unlock" | "live" — the purchase it stands in for. */
+  kind: string;
+  expiresAt: Date | null;
+  revokedAt: Date | null;
+};
+
+/** Why access is permitted. Rendered, never inferred — somebody who was comped
+ *  must not be shown a receipt they never received, and somebody who paid must
+ *  never be told their access was a favour. */
+export type AccessSource = "purchase" | "subscription" | "grant";
+
 /** The statuses Stripe considers to be paying, or about to be. */
 const LIVE_STATUSES = new Set(["active", "trialing", "past_due"]);
 
 export type Entitlements = {
-  /** The one-time unlock has been paid for this plan. */
+  /** The one-time unlock applies to this plan, however it was come by. */
   unlocked: boolean;
   /** Downloads in all four formats. */
   canExport: boolean;
@@ -41,9 +62,23 @@ export type Entitlements = {
   canShare: boolean;
   /** The ongoing plan: actuals, re-forecasting, lender updates. */
   liveSubscription: boolean;
+  /** How each was come by, or null where it was not. */
+  unlockSource: AccessSource | null;
+  liveSource: AccessSource | null;
   /** Why not, in the user's language. Null when everything is permitted. */
   blockedReason: string | null;
 };
+
+/** Whether a grant of this kind is in force. Revoked beats expiry beats kind,
+ *  and all three are read against the injected clock. */
+function grantInForce(grants: GrantState[] | undefined, kind: string, asOf: Date): boolean {
+  return (grants ?? []).some(
+    (g) =>
+      g.kind === kind &&
+      (g.revokedAt === null || g.revokedAt > asOf) &&
+      (g.expiresAt === null || g.expiresAt > asOf),
+  );
+}
 
 /**
  * What this workspace may do with this plan.
@@ -56,18 +91,40 @@ export type Entitlements = {
 export function entitlementsFor(input: {
   plan: PlanEntitlementState;
   subscription?: SubscriptionState | null;
+  /** Grants already scoped to this workspace and plan by the caller. */
+  grants?: GrantState[];
   /** Injected so the decision is deterministic in a test. */
   asOf?: Date;
 }): Entitlements {
   const asOf = input.asOf ?? new Date();
-  const unlocked = input.plan.unlockedAt !== null && input.plan.unlockedAt <= asOf;
-  const liveSubscription = isSubscriptionLive(input.subscription, asOf);
+
+  // A payment outranks a grant as the recorded reason, so that re-granting
+  // something already bought never rewrites why the person has it.
+  const purchased = input.plan.unlockedAt !== null && input.plan.unlockedAt <= asOf;
+  const grantedUnlock = grantInForce(input.grants, "unlock", asOf);
+  const unlocked = purchased || grantedUnlock;
+  const unlockSource: AccessSource | null = purchased
+    ? "purchase"
+    : grantedUnlock
+      ? "grant"
+      : null;
+
+  const subscribed = isSubscriptionLive(input.subscription, asOf);
+  const grantedLive = grantInForce(input.grants, "live", asOf);
+  const liveSubscription = subscribed || grantedLive;
+  const liveSource: AccessSource | null = subscribed
+    ? "subscription"
+    : grantedLive
+      ? "grant"
+      : null;
 
   return {
     unlocked,
     canExport: unlocked,
     canShare: unlocked,
     liveSubscription,
+    unlockSource,
+    liveSource,
     blockedReason: unlocked
       ? null
       : `Exporting and sharing are part of the ${pricing.unlock.name} unlock — $${pricing.unlock.price}, once, for this plan. Reading it on screen stays free.`,

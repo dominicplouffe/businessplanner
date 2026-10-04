@@ -55,6 +55,35 @@ export const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://getventurel
 export const stripePriceUnlock = process.env.STRIPE_PRICE_UNLOCK ?? "";
 export const stripePriceLive = process.env.STRIPE_PRICE_LIVE ?? "";
 
+/**
+ * Who may reach /admin, by email address.
+ *
+ * An environment variable and not a database column, deliberately. The admin
+ * surface can give away paid access, so the question is what it takes to become
+ * one: with a column, any bug that writes a User row is a potential escalation,
+ * and the app has a self-service sign-up. With this, it takes a deploy and the
+ * server's settings file — which is also exactly the audience this product has
+ * today, which is one person.
+ *
+ * Empty means nobody, including in development. An admin surface that is open
+ * because it was not configured is the failure worth designing out.
+ */
+export function adminEmails(): readonly string[] {
+  return (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/** Case-insensitive, because an email address is. Read per call rather than at
+ *  import, so a test can exercise it without reloading the module. */
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const normalised = email.trim().toLowerCase();
+  if (!normalised) return false;
+  return adminEmails().includes(normalised);
+}
+
 /** What must be present before production traffic is served. */
 const REQUIRED_IN_PRODUCTION = [
   ["DATABASE_URL", process.env.DATABASE_URL],

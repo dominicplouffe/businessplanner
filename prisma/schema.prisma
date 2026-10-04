@@ -37,6 +37,7 @@ model User {
   accounts   Account[]
   members    WorkspaceMember[]
   plans      Plan[]            @relation("PlanCreatedBy")
+  grants     Grant[]           @relation("GrantGrantedBy")
 
   oauthclients       OauthClient[]
   oauthrefreshtokens OauthRefreshToken[]
@@ -317,6 +318,7 @@ model Workspace {
   plans         Plan[]
   purchases     Purchase[]
   subscriptions Subscription[]
+  grants        Grant[]
 
   @@map("workspace")
 }
@@ -397,6 +399,7 @@ model Plan {
   competitors Competitor[]
   shares    ShareLink[]
   purchases Purchase[]
+  grants    Grant[]
 
   @@index([workspaceId])
   @@index([createdById])
@@ -536,6 +539,50 @@ model Purchase {
   @@index([workspaceId])
   @@index([planId])
   @@map("purchase")
+}
+
+/// Access given without a payment: a comp, a pilot, a support remedy, the
+/// founder testing his own product.
+///
+/// Deliberately not a Purchase, and deliberately not a hand-written
+/// `Plan.unlockedAt`. Both of those belong to the webhook, and the whole reason
+/// `Purchase.stripeEventId` is unique is so "why does this workspace have
+/// access" always has an answer. A fabricated purchase row destroys that; a
+/// bare `unlockedAt` is indistinguishable from one. So a grant is a second,
+/// *named* source of entitlement that `entitlementsFor()` reads beside the
+/// purchase — one that can be explained, attributed, dated, expired and
+/// withdrawn, and that the billing page can render as what it is rather than
+/// as a receipt the person never received.
+model Grant {
+  id          String @id @default(cuid())
+  workspaceId String
+  /// Null grants every plan in the workspace, present and future.
+  planId      String?
+  /// "unlock" — export and sharing, the one-time purchase's equivalent.
+  /// "live"   — the ongoing subscription's features.
+  kind        String @default("unlock")
+  /// Required, and free text on purpose: a grant nobody can explain is a grant
+  /// nobody can audit.
+  reason      String
+  /// Who issued it. Not nullable — every grant has a person behind it.
+  grantedById String
+
+  /// Null never expires. Most comps should set one; permanent is a decision.
+  expiresAt DateTime?
+  /// Withdrawn rather than deleted, so the history survives the withdrawal and
+  /// a revoked grant still explains a period of access that really happened.
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan      Plan?     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  grantedBy User      @relation("GrantGrantedBy", fields: [grantedById], references: [id])
+
+  @@index([workspaceId])
+  @@index([planId])
+  @@map("grant")
 }
 
 /// The optional monthly plan. State mirrored from Stripe rather than inferred:
