@@ -132,6 +132,14 @@ Hairlines rather than shadows; motion under 200ms and reduced-motion aware.
 
 Regenerate colour ramps with `node scripts/generate-tokens.mjs`.
 
+The app icon is a drawn serif `V` on the ink tile — the wordmark's letter, since
+at sixteen pixels the brass diamond is two pixels of warm grey and the word is
+unreadable. `node scripts/generate-icons.mjs` writes `src/app/icon.svg` and
+renders every raster from it (`favicon.ico`, `apple-icon.png`, the manifest's
+192 and 512), so don't hand-edit one of them — the tab, the iOS home screen and
+the Android installer drift apart exactly the way four export builders reading
+four assemblies do.
+
 **Charts are hand-built SVG** (`src/components/charts/`), not a library. If a
 chart renders blank in the browser, check hydration first: Next's dev server
 blocks its dev resources when the host looks cross-origin, which silently stops
