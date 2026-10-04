@@ -79,7 +79,7 @@ src/lib/ai/            generators, cached prompts, the consistency checker
 src/lib/research/      cited market research
 src/lib/export/        one document assembly, four renderers
 src/lib/content/       industries, learn, glossary, and dated regulatory config
-infra/                 AWS CDK: ECS Fargate, RDS, CloudFront, ACM, Route 53
+deploy/                the Lightsail server: compose file, Caddy, settings template
 ```
 
 `CLAUDE.md` holds the conventions that are load-bearing — the ones where getting
@@ -88,29 +88,18 @@ before changing the engine, the statement shaping, or the token layer.
 
 ## Deploying
 
+One Lightsail server runs Postgres, the app and Caddy for HTTPS:
+
 ```
-node scripts/deploy.mjs              # the whole deploy, one question at a time
-node scripts/deploy.mjs --dry-run    # every question and command, writing nothing
+scripts/lightsail.sh init      # deploy/.env.production, with generated secrets
+scripts/lightsail.sh up        # the server, its IP, firewall and DNS, then a deploy
+scripts/lightsail.sh deploy    # every deploy after that
 ```
 
-Run it from the repository root. `pnpm deploy:aws` is an alias; the script has no
-dependencies of its own, so it never needs a package manager to start it — only
-`node`, the `aws` CLI, `docker` and `npx`.
-
-`scripts/deploy.mjs` walks the whole thing: preflight, CDK bootstrap, the stacks,
-the application secret, the image, the Stripe endpoint and the GitHub OIDC deploy
-role. It asks for every value it needs, checks each step against AWS before doing
-it — so a re-run resumes rather than repeating — and validates the database
-configuration against `describe-orderable-db-instance-options` before starting a
-twenty-five-minute deploy. Answers persist to `.deploy.json`; the four secret
-values never touch disk, which `tests/deploy.test.ts` asserts.
-
-`DEPLOY.md` is the same ground by hand, plus the recovery path for a failed first
-create and what is still open before a real launch — counsel review of the legal
-documents, and the regulatory verification queue.
-
-`.env` is for local development only. Nothing in the deploy reads it: the
-container's environment comes from the ECS task definition.
+`deploy/README.md` is the runbook, including connecting Claude to the MCP
+endpoint and what is still open before a real launch. `.env` is for local
+development only; the server's settings come from `deploy/.env.production`,
+which is gitignored.
 
 ## Licence
 

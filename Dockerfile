@@ -61,7 +61,7 @@ RUN node scripts/set-db-provider.mjs postgresql && pnpm exec prisma generate
 # against a Postgres client — and it rejects it while Next is collecting page
 # data, so the error names a route rather than the mismatch. Nothing connects
 # during a build: this is a shape, not a database. The real URL arrives at run
-# time from the task definition.
+# time from the settings file on the server (deploy/.env.production).
 ENV DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build
 ENV NEXT_TELEMETRY_DISABLED=1
 # Public values are inlined at build time by Next, so the origin has to be

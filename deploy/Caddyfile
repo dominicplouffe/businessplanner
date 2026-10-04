@@ -1,0 +1,32 @@
+# HTTPS for the domain, with certificates from Let's Encrypt, renewed by
+# Caddy on its own. www redirects to the bare domain.
+#
+# The security headers are the ones the CloudFront response-headers policy
+# used to add; with no CDN in front, Caddy is the edge.
+{
+	email {$ACME_EMAIL}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+		-Server
+	}
+}
+
+www.{$DOMAIN} {
+	import security_headers
+	redir https://{$DOMAIN}{uri} permanent
+}
+
+{$DOMAIN} {
+	import security_headers
+	encode zstd gzip
+	# No read timeout: generating a section over /mcp waits on the model for
+	# up to five minutes (maxDuration on that route), and so can a PDF render.
+	reverse_proxy web:3000
+}

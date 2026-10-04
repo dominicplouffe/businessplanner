@@ -186,6 +186,65 @@ Keep `SYSTEM_PROMPT` byte-stable — it carries the cache breakpoint, so a date 
 a reordered rule invalidates the cached prefix on every request. Per-plan content
 goes in the user message, after the breakpoint.
 
+## The MCP endpoint
+
+`/mcp` lets an assistant such as Claude build a plan on a person's behalf. It
+is Streamable HTTP, stateless, JSON responses (`src/app/mcp/route.ts`); the
+tools are `src/lib/mcp/tools.ts`.
+
+**A client supplies assumptions and prose, never a figure.** The writing
+tools take the intake's own flat answers, checked field by field against
+`INTAKE_STEPS` by `validateAnswers()` — an unknown key is refused, so there is
+no path for a statement figure. `src/lib/mcp/intake.ts` is a second renderer of
+that one list, not a second list, and `mergeAnswers()` re-seeds exactly as the
+wizard does (a model change clears the old model's drivers; an industry change
+touches only what is still `benchmark_default`). Answers are `estimated` unless
+the client says the person stated them. Prose written by the client goes
+through the review's consistency check and its unsupported figures come back.
+
+The tools share code with the app rather than copying it: `plan-service.ts`
+holds the intake merge and the generation context that the server action and
+the SSE route also use, and `market/evidence.ts` the competitor and citation
+writes. Every lookup is scoped to the token's workspace.
+
+**Auth is OAuth 2.1 from better-auth's own `@better-auth/oauth-provider`**, so
+Claude connects with the URL alone: the 401 names
+`/.well-known/oauth-protected-resource/mcp`, which names the issuer, whose
+metadata lives at `/.well-known/oauth-authorization-server/api/auth`. Clients
+register themselves (open DCR, PKCE); nothing is granted until the person
+approves on `/oauth/consent`. Things that were each found by a failing run:
+
+- The adapter is told `provider: "sqlite"` **on Postgres too**. The provider
+  decides list encoding, and the schema stores lists as JSON text; told
+  "postgresql" it hands Prisma native arrays for the OAuth scope and redirect
+  columns — invisible on SQLite, fatal on the first production registration.
+- `authorization_servers` must be the issuer (`…/api/auth`), not the origin; a
+  client fetches metadata from exactly that string and checks `issuer` matches.
+- The verifier derives the JWKS URL from `basePath` and gets `/jwks`. `/mcp`
+  passes its own: loopback to this process, so token checks do not depend on
+  DNS, TLS or Caddy.
+- OIDC treats an omitted `application_type` as `web`, which may not redirect to
+  loopback — i.e. every CLI client. The auth route marks a loopback-only
+  registration `native` (RFC 8252) when it did not say; `lib/mcp/registration.ts`.
+- better-auth's client already follows `{redirect: true, url}`. Navigating
+  again yourself aborts it; the sign-in form and consent page just step aside.
+- Access tokens are JWTs valid for an hour on their own, so `/mcp` also
+  requires a live `oauthConsent`. Disconnecting in Settings deletes it and the
+  token stops working on its next call.
+
+`npx auth generate` cannot parse `schema.prisma` (it chokes on `/* */`
+comments); generate into a scratch schema and copy the models across.
+
+`pnpm e2e:mcp` drives the whole connection in a real browser. Start the dev
+server **without** `ANTHROPIC_API_KEY` — the shell Claude Code runs in may
+carry one, and generation would then spend real money.
+
+**Known gap:** the live generator writes derived figures — a year-on-year
+difference, a hypothetical "tops out near $350,000" — which the consistency
+checker cannot trace. `tests/consistency.test.ts` runs only the fixture
+generator, so the live path has never been held to zero findings. MCP reports
+them; the app's Generate button produces the same.
+
 ## Billing
 
 `src/lib/billing/` has the same two-implementation shape as the AI and research
@@ -281,6 +340,24 @@ is the bug, not the test.
 The one exemption is the ECR repository name in the two workflow files, which an
 agent session cannot edit — see the note at the end of this section.
 
+**One Lightsail server is the deployment.** `scripts/lightsail.sh` (runbook:
+`deploy/README.md`) follows the pattern of the aivideo project: one instance
+running `deploy/docker-compose.yml` — Postgres, the production image, and Caddy
+for Let's Encrypt and the security headers. The image is built locally and
+streamed over SSH, so there is no registry. The script checks before it acts,
+is safe to re-run, and never touches an instance without its `app=venturelly`
+tag or DNS records it did not create.
+
+- `ACME_EMAIL` is required, not optional: Caddy treats an empty `email` as a
+  parse error and serves nothing. The rehearsal found it.
+- `check_env` refuses what `assertProductionEnv()` would refuse, so a deploy
+  fails on the laptop with a sentence rather than on the server in a log.
+- **`STRIPE_WEBHOOK_SECRET` comes first, not second.** Stripe accepts an
+  endpoint URL before anything answers it, so the live endpoint is created
+  before the first deploy and its secret is in the settings file from the
+  start. Nothing may run in production without it: the webhook is the only code
+  that grants an entitlement.
+
 `DATABASE_URL` alone decides the driver adapter, so there is no second flag to
 get out of step: a `postgres://` URL selects `@prisma/adapter-pg`, anything else
 selects better-sqlite3. Production must be Postgres, and
@@ -294,8 +371,12 @@ pair while Next is collecting page data — so the error names `/api/health`
 rather than the mismatch, which sends you looking in the wrong place.
 
 **Migrations, not `db push`.** `prisma migrate deploy` runs in the container's
-entrypoint before it binds a port, so a failed migration stops the task rather
-than serving traffic against a schema it does not match.
+entrypoint before it binds a port. The deploy runs it once on its own first
+(`docker compose run --rm web true`), so a failed migration stops the deploy
+while the previous release is still serving. **It is the only irreversible part
+of an update**: redeploying an earlier commit does not undo it, and nothing
+reviews a migration before it applies. `prisma/migrations/README.md` has the
+command that writes one.
 
 That CLI is installed separately, with npm, in the image's `migrator` stage, and
 lives in its own tree at `/app/migrate`. It cannot be copied out of the pnpm
@@ -305,167 +386,48 @@ beside it in the virtual store rather than at the top level, so a `COPY` of
 '@prisma/config'`. For the same reason the image ships `docker/prisma.config.js`
 in place of the repository's `prisma.config.ts` — a `.ts` config needs the
 TypeScript compiler, and `dotenv` has no business in a runtime image whose
-environment comes from the task definition.
+environment comes from the server's settings file.
 
 `instrumentation.ts` calls the boot guard, which is why a missing Stripe key is
 a startup failure rather than a runtime fallback to `DevBilling`.
 
-The infrastructure is CDK in `infra/`: ECS Fargate behind an ALB behind
-CloudFront, RDS Postgres Multi-AZ, the certificate in its own us-east-1 stack
-because CloudFront accepts no other region. `DEPLOY.md` is the runbook and
-`node scripts/deploy.mjs` is the runbook made executable — it asks for what it
-needs, checks each step against AWS before doing it, and is re-runnable, which is
-what a twenty-five-minute step requires. It is Node with no dependencies
-specifically so that `jq` and `openssl` are not prerequisites: `JSON.stringify`
-and `crypto.randomBytes` do both jobs. **Document it as `node scripts/deploy.mjs`
-and not as `pnpm deploy:aws`** — the `package.json` alias exists, but a script
-whose whole point is having no dependencies must not require a package manager
-to launch it, and the person deploying turned out not to have pnpm installed.
-
-**Pin a major engine version, never a minor.** `VER_17_2` failed the first real
-deploy ten minutes in with `Cannot find version 17.2 for postgres` — AWS retires
-Postgres minors on a schedule, so a pinned minor is a deploy that stops working
-on a date nobody wrote down. `VER_17` renders `EngineVersion: "17"` and RDS uses
-the current default. `tests/deploy.test.ts` fails on anything narrower.
-
-**A first deploy must not ask for tasks it cannot start.** The ECR repository is
-created by the same stack as the service, so on a first deploy it is necessarily
-empty — and CloudFormation blocks until an `AWS::ECS::Service` reaches steady
-state, which a service that cannot pull an image never does. With the deployment
-circuit breaker on it fails outright, taking twenty-five minutes of RDS and
-CloudFront down in the rollback. `BOOTSTRAP_TAG` in `infra/lib/site-stack.ts` is
-the answer: a deploy carrying that tag creates the service with
-`desiredCount: 0`, which is stable at once, and the second deploy raises it
-against an image that exists. The autoscaling block is skipped for the same
-deploy and that is the half that is easy to miss — Application Auto Scaling
-*enforces* `minCapacity`, so a scalable target registered during the bootstrap
-would put the count straight back to 2 and reproduce the hang.
-
-**Do not retain or protect a database on a deploy that might not finish.** The
-RETAIN on the RDS instance exists so a production database is not one `cdk
-destroy` away from losing every plan anybody paid for, and it stays — but applied
-to a *first* create it turns a failure into a wedge:
-
-    ROLLBACK_FAILED | VenturellySite
-    DELETE_FAILED   | DatabaseSecurityGroup, Vpc/dataSubnet1, Vpc/dataSubnet2
-
-Note which resource is absent. RETAIN did what it says: CloudFormation kept the
-database, and the retained instance's network interfaces held the isolated
-subnets and the security group, so the rollback could not finish. Clearing it
-meant deleting by hand a database that had never finished being created. So
-`deletionProtection` and `RemovalPolicy.RETAIN` are both conditioned on
-`!bootstrapping` — they arrive with the second deploy, which is also the one that
-brings the service up, and by then there is something to protect. Both changes
-are metadata or an in-place modify; neither replaces the instance.
-
-**A deleted stack is not a clean slate, however it was deleted.** Two resources
-outlive one and then collide on the next create: the ECR repository carries
-`removalPolicy: RETAIN` with a fixed name, and CloudFormation deletes a Secrets
-Manager secret with a recovery window of up to thirty days that keeps the name
-reserved. CloudFormation reports the collision as
-`[AWS::EarlyValidation::ResourceExistenceCheck]`, which names neither resource
-and advises `DescribeEvents` on a stack that may not exist.
-
-So the script checks for both **whenever the stack is about to be created**, not
-only when it did the deleting itself. That distinction cost a deploy: the stack
-had been deleted by hand — correctly, after a `ROLLBACK_FAILED` the script hands
-back — so step 3 said "does not exist yet" and skipped the two functions written
-for exactly this. A stack in `update` is the one case that must be left alone: it
-owns both, and offering to delete either is offering to break a running service.
-
-`REVIEW_IN_PROGRESS` is the one `_IN_PROGRESS` status that is not in progress. A
-change set that fails to create on a new stack parks an empty stack there
-indefinitely, so `stackAction` puts it in `recreate` rather than waiting forever
-for it to settle.
-
-A `DELETE_FAILED` or `ROLLBACK_FAILED` the script still refuses, because that
-needs `--retain-resources` and a decision about what to keep — but it prints the
-likely cause and the exact commands.
-
-**The deploy script writes answers down and never secrets.** `.deploy.json`
-(gitignored) carries region, account, domain and zone so a re-run does not
-re-ask. The four secret values go straight to Secrets Manager and are redacted
-even from `--dry-run` output. `answersToPersist()` is an allow-list rather than a
-deny-list, so a key added to the prompts later cannot leak by being forgotten,
-and `tests/deploy.test.ts` asserts no secret survives serialisation.
-
-**`STRIPE_WEBHOOK_SECRET` is inherently a second pass.** Stripe issues it when
-the endpoint is created, the endpoint needs the live URL, and the boot guard
-refuses to start without a value — so a marked placeholder goes in first and is
-replaced once the service is up. Nothing may report the deploy finished while
-that placeholder is in place: the webhook is the only code that grants an
-entitlement.
-
-**A key read out of a secret has to be a key that secret contains.** The task
-definition asked for `uri` on the database secret and every task died before
-starting:
-
-    ResourceInitializationError: unable to pull secrets or registry auth:
-    retrieved secret from Secrets Manager did not contain json key uri
-
-There is no such key and there never was. `dbSecret` is generated with
-`username` and `password`; attaching it to the instance adds `host`, `port`,
-`dbname` and `dbInstanceIdentifier`. Nothing in RDS or Secrets Manager composes
-a connection URL. So only `username` and `password` are read as secrets, the
-endpoint comes off the `database` construct as plain environment — an address in
-an isolated subnet is not a credential — and `docker-entrypoint.sh` assembles
-`DATABASE_URL` from the five, letting an explicit one win so `docker-compose`
-and every local run are unaffected.
-
-Interpolating the password straight into that URL is safe **by construction**:
-`excludeCharacters` on `DbSecret` removes every character significant in a URL.
-Relaxing that set without encoding in the entrypoint yields a connection string
-that parses and points somewhere else. `tests/deploy.test.ts` checks both — the
-keys read against the keys created, and the excluded set.
-
-**A readline interface swallows Ctrl-C.** On a TTY, with no `SIGINT` listener
-attached, it emits `pause` on the stream rather than letting the signal reach the
-process. That was harmless while `scripts/deploy.mjs` created and closed an
-interface around each question; keeping one open for the whole run — which is
-what made piped input work — left no way out of a five-minute wait.
-`process.on("SIGINT")` does not help on its own, because readline consumes the
-signal first: the listener has to be on the interface as well. The handler names
-the step, says what the interrupt cost there, and prints the `--from=` to resume
-with.
+**Pin a major version, never a minor** — `postgres:17-alpine`, not `17.2`. The
+lesson came from RDS, where a pinned minor that AWS had retired failed the first
+real deploy ten minutes in; a data directory is compatible within a major, and a
+minor pin is a deploy that stops working on a date nobody wrote down.
+`tests/lightsail.test.ts` fails on anything narrower.
 
 **Check the daemon, not the client.** `docker --version` prints the client's own
 version and contacts nothing, so it succeeded on a machine where the socket was
-root-only — `✓ Docker version 29.7.2` printed immediately before `permission
-denied while trying to connect to the docker API`. `docker version --format
-{{.Server.Version}}` is the probe. The same shape as the RDS preflight that never
-ran: a check that cannot fail is not a check.
+root-only. `docker version --format {{.Server.Version}}` is the probe; a check
+that cannot fail is not a check.
 
-How Docker is invoked is resolved once, into `DOCKER`, and login, build and push
-all go through it. That is not tidiness — `docker login` writes credentials into
-the home directory of whoever runs it, so prefixing `sudo` on the build alone
-leaves the push authenticating as root against a config written by the user, and
-the resulting denial reads as an ECR fault.
-
-`--platform linux/amd64` on `docker build` is not optional. The task definition
-pins X86_64, and an arm64 image dies with `exec format error`, which reads as an
-application fault.
+`--platform linux/amd64` on the build is not optional. The server is x86, and an
+arm64 image dies with `exec format error`, which reads as an application fault.
 
 `.github/workflows/ci.yml` verifies every pull request and non-main branch,
 including a container build, because the image is the artefact that ships — a
 broken Dockerfile should fail on a branch rather than during a deploy.
-`deploy.yml` runs on push to `main` and stops on its first step, naming the
-missing `AWS_DEPLOY_ROLE_ARN`, until the GitHub deploy role step of DEPLOY.md
-has been done. After that a push to `main` *is* the deploy: verify, build, push,
-`cdk deploy`, wait for the service, invalidate, check `/api/health`.
-`node scripts/deploy.mjs --from=6` is the same thing by hand.
 
-**A migration is the only irreversible part of an update.** The service rolls
-forward with no downtime and the circuit breaker reverts a bad image by itself,
-but redeploying an earlier tag does not undo `prisma migrate deploy` — it already
-ran in the entrypoint before the port was bound. Nothing reviews a migration
-before it applies.
+**You cannot edit either workflow file from an agent session.** GitHub refuses a
+push that writes under `.github/workflows/` unless the credential carries the
+`workflow` scope, and neither the git credential nor the REST API available here
+has it. Both routes fail late, after the commit looks fine locally. A change to a
+workflow has to be made from a clone; there is no workaround worth building, and
+parking the files elsewhere so a push succeeds means the repository has no CI.
 
-**You cannot edit either file from an agent session.** GitHub refuses a push that
-writes under `.github/workflows/` unless the credential carries the `workflow`
-scope, and neither the git credential nor the REST API available here has it.
-Both routes fail late, after the commit looks fine locally. A change to a workflow
-has to be made from a clone; there is no workaround worth building, and parking
-the files elsewhere so a push succeeds means the repository has no CI.
+**The CDK deployment is retired.** It was ECS Fargate, RDS and CloudFront, at
+$90–130 a month; `infra/` and `DEPLOY.md` are deleted, and the lessons specific
+to them (bootstrap tags, RETAIN on a first create, secret keys, the circuit
+breaker) live in git history up to `1b3eb7d`. What remains:
+
+- `node scripts/deploy.mjs --destroy` removes the stack if it still exists. It
+  uses the AWS CLI alone; every other invocation refuses. Once it reports that
+  nothing billable is left, delete it with `scripts/lib/deploy-config.*` and
+  `tests/deploy.test.ts`.
+- `.github/workflows/deploy.yml` still describes a CDK deploy on push to `main`.
+  It stops on its first step without `AWS_DEPLOY_ROLE_ARN`, and would now fail
+  at the missing `infra/` if that were ever set. Delete it from a clone.
 
 ## Known gaps
 

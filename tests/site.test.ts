@@ -260,8 +260,8 @@ describe("sample plans", () => {
    or a comment, which is exactly what `brand.ts` cannot protect.
    ========================================================================== */
 describe("the name and the domain", () => {
-  const ROOTS = ["src", "public", "infra/bin", "infra/lib", ".github/workflows"];
-  const FILES = ["README.md", "DEPLOY.md", "CLAUDE.md", "Dockerfile", ".env.example"];
+  const ROOTS = ["src", "public", "deploy", "scripts", ".github/workflows"];
+  const FILES = ["README.md", "CLAUDE.md", "Dockerfile", ".env.example"];
 
   /** Any getventur*.com that is not the one domain. */
   const WRONG_DOMAIN = /getventur(?!ely\b)[a-z]*\.com/gi;
@@ -276,7 +276,7 @@ describe("the name and the domain", () => {
    *  carry the ECR repository name, and GitHub refuses a push that writes under
    *  .github/workflows/ from a credential without the `workflow` scope — so an
    *  agent session cannot rename it, and a test it cannot make pass would just
-   *  be a permanently red suite. DEPLOY.md carries the command instead. */
+   *  be a permanently red suite. */
   const BRAND_EXEMPT = /^\.github\/workflows\//;
 
   async function collect(dir: string, out: string[]): Promise<string[]> {

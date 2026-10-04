@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-/* The load balancer's target-group check. It touches the database on purpose:
-   a task that has lost its connection pool is not healthy, and answering 200
-   from memory would keep it in rotation while every request fails. */
+/* The image's health check, which the deploy waits on. It touches the database on purpose:
+   a container that has lost its connection pool is not healthy, and answering 200
+   from memory would report it serving while every request fails. */
 
 export const dynamic = "force-dynamic";
 

@@ -14,8 +14,6 @@ const config = [
       "node_modules/**",
       "next-env.d.ts",
       "*.tmp.mjs",
-      // Its own CDK project, with its own tsconfig and dependency tree.
-      "infra/**",
     ],
   },
 ];

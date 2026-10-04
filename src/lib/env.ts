@@ -76,7 +76,7 @@ export function assertProductionEnv(): void {
   if (missing.length > 0) {
     throw new Error(
       `Refusing to start: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not set. ` +
-        "See .env.example and DEPLOY.md.",
+        "See .env.example and deploy/README.md.",
     );
   }
 

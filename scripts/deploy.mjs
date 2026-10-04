@@ -1,5 +1,22 @@
 #!/usr/bin/env node
 /* ==========================================================================
+   RETIRED: tear down the old ECS/RDS/CloudFront stack.
+   --------------------------------------------------------------------------
+   Venturelly now deploys to one Lightsail server with `scripts/lightsail.sh`
+   (see deploy/README.md), and `infra/` — the CDK app this script deployed —
+   has been deleted. The only thing this script still does is `--destroy`,
+   which removes the old stack: it uses the AWS CLI alone and never needed the
+   CDK app. Every other invocation refuses and says so.
+
+       node scripts/deploy.mjs --destroy    # asks you to type the domain first
+
+   Delete this file, `scripts/lib/deploy-config.*` and `tests/deploy.test.ts`
+   once `--destroy` reports that nothing billable is left. The deploy code
+   below is kept only because the teardown shares its helpers; git history has
+   the rest of the story.
+
+   What follows is the original header.
+   --------------------------------------------------------------------------
    Deploy Venturelly to AWS, one question at a time.
    --------------------------------------------------------------------------
    `DEPLOY.md` used to be the whole of this: seven manual steps across three
@@ -91,24 +108,13 @@ const STACK_ONLY = argv.includes("--stack-only");
    `cdk destroy` cannot do it — see `destroy()` for why. */
 const DESTROY = argv.includes("--destroy");
 
-const USAGE = `Deploy Venturelly to AWS.
+const USAGE = `Tear down the retired ECS/RDS/CloudFront stack.
 
-  node scripts/deploy.mjs                the whole thing, resumable
-  node scripts/deploy.mjs --dry-run      every question and command, writing nothing
-  node scripts/deploy.mjs --from=6       resume at a step (preflight always runs)
-  node scripts/deploy.mjs --stack-only   redeploy the stack, no image rebuild
-  node scripts/deploy.mjs --destroy      tear it all down; asks you to type the domain first
-  node scripts/deploy.mjs --help         this
+  node scripts/deploy.mjs --destroy            removes it; asks you to type the domain first
+  node scripts/deploy.mjs --destroy --dry-run  shows what it would delete, deleting nothing
 
-Steps:
-  1 preflight          6 build and push the image
-  2 bootstrap CDK      7 wait for the service
-  3 recover a failure  8 point Stripe at the webhook
-  4 create the stacks  9 GitHub deploy role (optional)
-  5 the app secret
-
-Needs the AWS CLI v2 and working credentials; Docker from step 6.
-DEPLOY.md has the manual equivalent of every step.
+Deploying is scripts/lightsail.sh now — see deploy/README.md.
+Needs the AWS CLI v2 and working credentials.
 `;
 
 if (argv.includes("--help") || argv.includes("-h")) {
@@ -1690,6 +1696,15 @@ async function destroy(answers) {
 
 async function main() {
   if (DESTROY) return destroy(loadAnswers());
+
+  // The CDK app is gone; only the teardown above still works.
+  out();
+  out(bold("The AWS CDK deploy is retired."));
+  out("  Deploy with:            scripts/lightsail.sh up   (see deploy/README.md)");
+  out("  Remove the old stack:   node scripts/deploy.mjs --destroy");
+  out();
+  closeInput();
+  process.exit(1);
 
   out();
   out(bold("Deploy Venturelly to AWS"));

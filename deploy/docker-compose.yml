@@ -1,0 +1,68 @@
+# Venturelly on one server: Postgres, the web app, and Caddy for HTTPS.
+# Placed at /opt/venturelly by scripts/lightsail.sh, beside:
+#   .env      IMAGE, POSTGRES_PASSWORD, DOMAIN, ACME_EMAIL (for this file)
+#   app.env   the app's own settings and secrets (deploy/.env.production)
+#   Caddyfile
+name: venturelly
+
+services:
+  postgres:
+    # A major version, never a minor — see "Pin a major engine version" in
+    # CLAUDE.md. The data directory is only compatible within a major.
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: venturelly
+      POSTGRES_DB: venturelly
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Over TCP, not the local socket: on its very first start the image
+      # runs a setup server on the socket only, and a socket check reports
+      # it ready while the app still cannot connect.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U venturelly -d venturelly"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    image: ${IMAGE}
+    restart: unless-stopped
+    env_file: app.env
+    environment:
+      NODE_ENV: production
+      # The standalone server binds $HOSTNAME, and a container runtime may
+      # supply its own. Bound to one interface, the image's health check on
+      # 127.0.0.1 is refused while Caddy still gets through.
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    # The entrypoint applies migrations before the port is bound, so a failed
+    # migration stops the container rather than serving a schema it does not
+    # match. The deploy runs that step on its own first, so the failure lands
+    # in the deploy rather than in a restart loop.
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

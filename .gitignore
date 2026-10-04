@@ -17,3 +17,7 @@ prisma/dev.db*
 # Answers the deploy script remembers between runs. Never secrets — see
 # scripts/lib/deploy-config.mjs and the invariant test in tests/deploy.test.ts.
 .deploy.json
+
+# Production settings and database dumps for scripts/lightsail.sh. Secrets.
+deploy/.env.production
+deploy/backups/
