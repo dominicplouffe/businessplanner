@@ -11,6 +11,7 @@ import { buildDeck } from "@/lib/export/pptx";
 import { renderPdf } from "@/lib/export/pdf";
 import { generatorKind } from "@/lib/ai";
 import { getEntitlements } from "@/lib/billing";
+import { internalOrigin } from "@/lib/env";
 
 /* ==========================================================================
    Export.
@@ -102,10 +103,11 @@ export async function GET(
   let body: Buffer;
   try {
     if (format === "pdf") {
-      const origin = request.nextUrl.origin;
+      // Over loopback, not the request's origin: behind Caddy that reads
+      // https://0.0.0.0:3000, which nothing answers. See `internalOrigin`.
       body = await renderPdf({
-        url: `${origin}/print/${plan.id}`,
-        origin,
+        url: `${internalOrigin}/print/${plan.id}`,
+        origin: internalOrigin,
         // Chromium gets the caller's own session, so the pipeline has exactly
         // the access the person clicking export already had.
         cookies: request.cookies.getAll().map((c) => ({ name: c.name, value: c.value })),

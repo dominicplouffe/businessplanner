@@ -73,8 +73,21 @@ export function ExportPanel({
     try {
       const response = await fetch(`/api/export/${format}?planId=${encodeURIComponent(planId)}`);
       if (!response.ok) {
-        const payload = (await response.json()) as { error?: string; blocking?: Blocking[] };
-        setError(payload.error ?? "The export failed.");
+        /* Read as text first. A failure that never reached the route's own
+           error handling — the server crashing, the proxy timing out — has an
+           empty or HTML body, and `response.json()` on that surfaced as
+           "Unexpected end of JSON input", which told the person nothing. */
+        const text = await response.text();
+        let payload: { error?: string; blocking?: Blocking[] } = {};
+        try {
+          payload = text ? (JSON.parse(text) as typeof payload) : {};
+        } catch {
+          payload = {};
+        }
+        setError(
+          payload.error ??
+            `The export failed (${response.status}${response.statusText ? ` ${response.statusText}` : ""}). Please try again in a moment.`,
+        );
         setBlocking(payload.blocking ?? []);
         return;
       }

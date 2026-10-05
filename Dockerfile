@@ -119,6 +119,12 @@ ENV NODE_ENV=production \
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
+# Playwright reads browsers.json through a computed path that output tracing
+# cannot follow; without it Playwright fails to load and the PDF export with
+# it. next.config.ts includes the package explicitly. This makes losing it a
+# build failure instead of an empty 500 in production.
+RUN find node_modules/.pnpm -path '*/playwright-core/browsers.json' | grep -q . \
+ || { echo "playwright-core/browsers.json is missing from the standalone output" >&2; exit 1; }
 
 # Migrations are applied by the entrypoint, so the schema, the migration files
 # and a Prisma CLI have to be present at run time — not just at build time. The

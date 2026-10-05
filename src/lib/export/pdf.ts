@@ -1,5 +1,5 @@
 import "server-only";
-import { chromium, type Browser } from "playwright";
+import type { Browser } from "playwright";
 
 /* ==========================================================================
    PDF, via Chromium.
@@ -29,6 +29,11 @@ export type PdfOptions = {
 export async function renderPdf(options: PdfOptions): Promise<Buffer> {
   let browser: Browser | null = null;
   try {
+    /* Loaded here rather than at the top of the module, so the export route
+       does not depend on Playwright loading. When it could not, every format
+       failed with an empty 500, not just the PDF; now the PDF reports its own
+       error and the other three are unaffected. */
+    const { chromium } = await import("playwright");
     browser = await chromium.launch({
       ...(EXECUTABLE ? { executablePath: EXECUTABLE } : {}),
       args: ["--no-sandbox", "--disable-dev-shm-usage"],
@@ -44,7 +49,11 @@ export async function renderPdf(options: PdfOptions): Promise<Buffer> {
           domain: hostname,
           path: "/",
           httpOnly: false,
-          secure: protocol === "https:",
+          /* Secure on loopback as well as https. Production's session cookie
+             is `__Secure-` prefixed, which a browser accepts only as Secure,
+             and Chromium treats 127.0.0.1 as a secure context — so it is set
+             and sent over plain http there. */
+          secure: protocol === "https:" || hostname === "127.0.0.1",
           sameSite: "Lax" as const,
         })),
       );

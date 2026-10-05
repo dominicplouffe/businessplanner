@@ -21,7 +21,8 @@ const exampleKeys = new Map(
 
 /** Every variable `src/lib/env.ts` reads, which is what the boot guard checks. */
 const envReads = [...new Set([...read("src/lib/env.ts").matchAll(/process\.env\.([A-Z_]+)/g)].map((m) => m[1]!))]
-  .filter((name) => name !== "NODE_ENV");
+  // Both set by the image and the compose file, never by the settings file.
+  .filter((name) => name !== "NODE_ENV" && name !== "PORT");
 
 describe("the production settings file", () => {
   it("names every variable the app reads at boot", () => {
@@ -96,5 +97,33 @@ describe("keeping secrets where they belong", () => {
 
   it("builds for the architecture the server runs", () => {
     expect(script).toContain("--platform linux/amd64");
+  });
+});
+
+describe("what only fails in the production image", () => {
+  /* Neither of these can fail under `next dev`, where node_modules is whole
+     and the request arrives directly. Both shipped: every export answered an
+     empty 500, and once that was fixed the PDF would still have failed. */
+
+  it("does not load Playwright until a PDF is asked for", () => {
+    /* Output tracing left playwright-core's browsers.json out of the image, so
+       Playwright failed to load — and as a top-level import of the export
+       route it took the spreadsheet and the documents down with the PDF. */
+    const pdf = read("src/lib/export/pdf.ts");
+    expect(pdf).not.toMatch(/^import \{[^}]*\bchromium\b[^}]*\} from "playwright"/m);
+    expect(pdf).toMatch(/await import\("playwright"\)/);
+  });
+
+  it("traces the whole of playwright-core into the image, and the build checks it", () => {
+    expect(read("next.config.ts")).toMatch(/outputFileTracingIncludes[\s\S]*playwright-core/);
+    expect(read("Dockerfile")).toMatch(/playwright-core\/browsers\.json/);
+  });
+
+  it("renders the PDF over loopback, not from the request's origin", () => {
+    /* Behind Caddy, Next reports the origin as https://0.0.0.0:3000 — its bind
+       address with the forwarded protocol — which nothing answers. */
+    const route = read("src/app/api/export/[format]/route.ts");
+    expect(route).not.toMatch(/request\.nextUrl\.origin/);
+    expect(route).toMatch(/\$\{internalOrigin\}\/print\//);
   });
 });

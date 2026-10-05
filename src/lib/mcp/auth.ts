@@ -2,6 +2,7 @@ import "server-only";
 import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resource-client";
 import { auth, authIssuer, mcpResource, MCP_SCOPES } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { internalOrigin } from "@/lib/env";
 import { getOrCreateWorkspace } from "@/lib/session";
 import type { McpCaller } from "./tools";
 
@@ -20,15 +21,12 @@ import type { McpCaller } from "./tools";
 
 const resourceClient = oauthProviderResourceClient(auth).getActions();
 
-/* Where the signing keys are read from: this same server, over loopback.
-
-   The library derives the address from `basePath`, which this config leaves
-   at its default, and so asked for /jwks rather than /api/auth/jwks — every
-   token failed with "Jwks failed: Not Found". The public origin would also
-   work, but would make every token check depend on DNS, TLS and the proxy in
-   front of this process; the keys are this process's own. Fetched once and
-   cached by the library, then refetched when an unknown key id appears. */
-const jwksUrl = `http://127.0.0.1:${process.env.PORT ?? "3000"}/api/auth/jwks`;
+/* The signing keys, read from this same process over loopback. The library
+   derives the address from `basePath`, which this config leaves at its
+   default, and so asked for /jwks rather than /api/auth/jwks — every token
+   failed with "Jwks failed: Not Found". Fetched once and cached by the
+   library, then refetched when an unknown key id appears. */
+const jwksUrl = `${internalOrigin}/api/auth/jwks`;
 
 /** The discovery document /.well-known/oauth-protected-resource/mcp serves. */
 export function protectedResourceMetadata() {

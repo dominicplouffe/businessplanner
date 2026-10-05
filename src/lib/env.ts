@@ -39,6 +39,18 @@ export const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://getventurel
 );
 
 /**
+ * This server, as the processes beside it reach it: over loopback.
+ *
+ * For a request the server makes to itself — Chromium loading the print route
+ * for a PDF, `/mcp` fetching the signing keys. Deriving it from the incoming
+ * request is wrong behind a proxy: Next reports the origin as its own bind
+ * address with the forwarded protocol, `https://0.0.0.0:3000`, which nothing
+ * answers. And the public origin would make each of these depend on DNS, TLS
+ * and the proxy for a call that never needs to leave the container.
+ */
+export const internalOrigin = `http://127.0.0.1:${process.env.PORT ?? "3000"}`;
+
+/**
  * The Stripe prices checkout charges against.
  *
  * Price ids and not amounts: the amount lives in Stripe, which is what makes
